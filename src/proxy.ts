@@ -20,6 +20,11 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Allow seed API endpoint for database migration
+  if (pathname === "/api/seed") {
+    return NextResponse.next();
+  }
+
   // If trying to access login page
   if (pathname === "/login") {
     if (authenticated) {

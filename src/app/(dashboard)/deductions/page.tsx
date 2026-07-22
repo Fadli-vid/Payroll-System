@@ -94,13 +94,11 @@ export default function DeductionsPage() {
         sortBy,
         sortOrder,
       };
-      const { data: response } = await axios.get<{
-        data: Deduction[];
-        meta: { total: number };
-      }>("/api/deductions", { params });
+      const { data: response } = await axios.get("/api/deductions", { params });
 
-      setData(response.data);
-      setTotal(response.meta.total);
+      const result = response.data;
+      setData(Array.isArray(result?.data) ? result.data : Array.isArray(result) ? result : []);
+      setTotal(result?.meta?.total || 0);
     } catch (error) {
       toast.error("Gagal mengambil data potongan");
       console.error(error);

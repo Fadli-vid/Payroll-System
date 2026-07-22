@@ -96,13 +96,11 @@ export default function AllowancesPage() {
         sortBy,
         sortOrder,
       };
-      const { data: response } = await axios.get<{
-        data: Allowance[];
-        meta: { total: number };
-      }>("/api/allowances", { params });
+      const { data: response } = await axios.get("/api/allowances", { params });
 
-      setData(response.data);
-      setTotal(response.meta.total);
+      const result = response.data;
+      setData(Array.isArray(result?.data) ? result.data : Array.isArray(result) ? result : []);
+      setTotal(result?.meta?.total || 0);
     } catch (error) {
       toast.error("Gagal mengambil data tunjangan");
       console.error(error);

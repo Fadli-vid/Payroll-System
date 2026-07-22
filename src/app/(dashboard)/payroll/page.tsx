@@ -138,7 +138,8 @@ export default function PayrollPage() {
     async function loadDepts() {
       try {
         const { data: res } = await axios.get("/api/departments?pageSize=100");
-        setDepartments(res.data || []);
+        const deptList = res.data?.data || res.data || [];
+        setDepartments(Array.isArray(deptList) ? deptList : []);
       } catch (err) {
         console.error("Gagal memuat departemen", err);
       }
