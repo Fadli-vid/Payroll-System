@@ -1,0 +1,230 @@
+// Payroll Management System — Prisma Schema
+// All IDs use UUID. All models include createdAt + updatedAt.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────
+
+enum EmploymentStatus {
+  ACTIVE
+  INACTIVE
+  RESIGNED
+  TERMINATED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  LEAVE
+  SICK
+  VACATION
+  ABSENT
+}
+
+enum PayrollStatus {
+  DRAFT
+  APPROVED
+  PAID
+}
+
+enum PayrollDetailType {
+  EARNING
+  DEDUCTION
+}
+
+// ─── Department ──────────────────────────────────────────
+
+model Department {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employees Employee[]
+
+  @@map("departments")
+}
+
+// ─── Position ────────────────────────────────────────────
+
+model Position {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  baseAllowance Decimal  @default(0) @db.Decimal(15, 2)
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  employees Employee[]
+
+  @@map("positions")
+}
+
+// ─── Employee ────────────────────────────────────────────
+
+model Employee {
+  id           String           @id @default(uuid())
+  code         String           @unique
+  fullName     String
+  email        String           @unique
+  phone        String?
+  address      String?
+  hireDate     DateTime
+  status       EmploymentStatus @default(ACTIVE)
+  baseSalary   Decimal          @db.Decimal(15, 2)
+  departmentId String
+  positionId   String
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  department Department @relation(fields: [departmentId], references: [id])
+  position   Position   @relation(fields: [positionId], references: [id])
+
+  attendances        Attendance[]
+  payrolls           Payroll[]
+  employeeAllowances EmployeeAllowance[]
+  employeeDeductions EmployeeDeduction[]
+
+  @@index([departmentId])
+  @@index([positionId])
+  @@map("employees")
+}
+
+// ─── Attendance ──────────────────────────────────────────
+
+model Attendance {
+  id            String           @id @default(uuid())
+  employeeId    String
+  date          DateTime         @db.Date
+  status        AttendanceStatus @default(PRESENT)
+  checkIn       DateTime?
+  checkOut      DateTime?
+  lateMinutes   Int              @default(0)
+  overtimeHours Decimal          @default(0) @db.Decimal(5, 2)
+  workingHours  Decimal          @default(0) @db.Decimal(5, 2)
+  notes         String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, date])
+  @@index([employeeId])
+  @@map("attendances")
+}
+
+// ─── Allowance (master) ──────────────────────────────────
+
+model Allowance {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  amount      Decimal  @db.Decimal(15, 2)
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employeeAllowances EmployeeAllowance[]
+
+  @@map("allowances")
+}
+
+// ─── Deduction (master) ──────────────────────────────────
+
+model Deduction {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  amount      Decimal  @db.Decimal(15, 2)
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employeeDeductions EmployeeDeduction[]
+
+  @@map("deductions")
+}
+
+// ─── Employee ↔ Allowance (junction) ─────────────────────
+
+model EmployeeAllowance {
+  id          String   @id @default(uuid())
+  employeeId  String
+  allowanceId String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  allowance Allowance @relation(fields: [allowanceId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, allowanceId])
+  @@map("employee_allowances")
+}
+
+// ─── Employee ↔ Deduction (junction) ─────────────────────
+
+model EmployeeDeduction {
+  id          String   @id @default(uuid())
+  employeeId  String
+  deductionId String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  deduction Deduction @relation(fields: [deductionId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, deductionId])
+  @@map("employee_deductions")
+}
+
+// ─── Payroll ─────────────────────────────────────────────
+
+model Payroll {
+  id             String        @id @default(uuid())
+  employeeId     String
+  month          Int
+  year           Int
+  basicSalary    Decimal       @db.Decimal(15, 2)
+  allowanceTotal Decimal       @default(0) @db.Decimal(15, 2)
+  deductionTotal Decimal       @default(0) @db.Decimal(15, 2)
+  overtimePay    Decimal       @default(0) @db.Decimal(15, 2)
+  bonus          Decimal       @default(0) @db.Decimal(15, 2)
+  netSalary      Decimal       @db.Decimal(15, 2)
+  status         PayrollStatus @default(DRAFT)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  employee Employee        @relation(fields: [employeeId], references: [id])
+  details  PayrollDetail[]
+
+  @@unique([employeeId, month, year])
+  @@index([employeeId])
+  @@index([month, year])
+  @@map("payrolls")
+}
+
+// ─── Payroll Detail ──────────────────────────────────────
+
+model PayrollDetail {
+  id          String            @id @default(uuid())
+  payrollId   String
+  component   String
+  type        PayrollDetailType
+  amount      Decimal           @db.Decimal(15, 2)
+  description String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  payroll Payroll @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+
+  @@index([payrollId])
+  @@map("payroll_details")
+}
