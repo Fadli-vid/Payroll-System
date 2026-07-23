@@ -595,7 +595,12 @@ export default function AttendancePage() {
                 }}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Pilih karyawan" />
+                  <SelectValue placeholder="Pilih karyawan">
+                    {(val: string) => {
+                      const emp = employees.find((e) => e.id === val);
+                      return emp ? `${emp.fullName} (${emp.code})` : val;
+                    }}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {employees.map((e) => (
@@ -646,7 +651,9 @@ export default function AttendancePage() {
                   }}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Pilih status" />
+                    <SelectValue placeholder="Pilih status">
+                      {(val: string) => ATTENDANCE_STATUS_LABELS[val as keyof typeof ATTENDANCE_STATUS_LABELS] || val}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {Object.entries(ATTENDANCE_STATUS_LABELS).map(

@@ -552,7 +552,9 @@ export default function EmployeesPage() {
                   onValueChange={(val) => { if (val) form.setValue("departmentId", val, { shouldValidate: true }) }}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Pilih departemen" />
+                    <SelectValue placeholder="Pilih departemen">
+                      {(val: string) => departments.find((d) => d.id === val)?.name || val}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {departments.map((d) => (
@@ -577,7 +579,9 @@ export default function EmployeesPage() {
                   onValueChange={(val) => { if (val) form.setValue("positionId", val, { shouldValidate: true }) }}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Pilih jabatan" />
+                    <SelectValue placeholder="Pilih jabatan">
+                      {(val: string) => positions.find((p) => p.id === val)?.name || val}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {positions.map((p) => (
@@ -627,7 +631,9 @@ export default function EmployeesPage() {
                   }}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Pilih status" />
+                    <SelectValue placeholder="Pilih status">
+                      {(val: string) => EMPLOYMENT_STATUS_LABELS[val as keyof typeof EMPLOYMENT_STATUS_LABELS] || val}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {Object.entries(EMPLOYMENT_STATUS_LABELS).map(

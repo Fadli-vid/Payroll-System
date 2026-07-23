@@ -543,7 +543,9 @@ export default function PayrollPage() {
                 }}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Departemen" />
+                  <SelectValue placeholder="Departemen">
+                    {(val: string) => val === "all" ? "Semua Departemen" : (departments.find((d) => d.id === val)?.name || val)}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Semua Departemen</SelectItem>
@@ -663,7 +665,9 @@ export default function PayrollPage() {
                 }}
               >
                 <SelectTrigger id="departmentId">
-                  <SelectValue placeholder="Semua Departemen" />
+                  <SelectValue placeholder="Semua Departemen">
+                    {(val: string) => val === "all" ? "Semua Departemen (Semua Karyawan)" : (departments.find((d) => d.id === val)?.name || val)}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Semua Departemen (Semua Karyawan)</SelectItem>
