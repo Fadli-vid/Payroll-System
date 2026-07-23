@@ -16,7 +16,6 @@ import {
   Receipt,
   Calculator,
   FileBarChart,
-  Settings,
   CircleDollarSign,
   X,
 } from "lucide-react";
@@ -32,7 +31,6 @@ const navItems = [
   { title: "Potongan", href: "/deductions", icon: Receipt },
   { title: "Penggajian", href: "/payroll", icon: Calculator },
   { title: "Laporan", href: "/reports", icon: FileBarChart },
-  { title: "Pengaturan", href: "/settings", icon: Settings },
 ];
 
 interface AppShellProps {

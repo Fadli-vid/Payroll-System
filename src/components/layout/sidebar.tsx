@@ -13,7 +13,6 @@ import {
   Receipt,
   Calculator,
   FileBarChart,
-  Settings,
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
@@ -31,7 +30,6 @@ const navItems = [
   { title: "Potongan", href: "/deductions", icon: Receipt },
   { title: "Penggajian", href: "/payroll", icon: Calculator },
   { title: "Laporan", href: "/reports", icon: FileBarChart },
-  { title: "Pengaturan", href: "/settings", icon: Settings },
 ];
 
 export function Sidebar() {

@@ -33,7 +33,6 @@ const pageTitles: Record<string, string> = {
   "/deductions": "Potongan",
   "/payroll": "Penggajian",
   "/reports": "Laporan",
-  "/settings": "Pengaturan",
 };
 
 
