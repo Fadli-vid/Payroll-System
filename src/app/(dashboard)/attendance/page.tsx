@@ -12,6 +12,8 @@ import {
   CalendarCheck,
   Clock,
   AlertTriangle,
+  Users,
+  CheckCircle2,
 } from "lucide-react";
 import {
   Card,
@@ -44,10 +46,30 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/src/components/ui/dropdown-menu";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/src/components/ui/table";
 import { DataTable, type Column } from "@/src/components/layout/data-table";
 import { ConfirmDialog } from "@/src/components/layout/confirm-dialog";
 import { attendanceSchema, type AttendanceFormValues } from "@/src/types";
 import { ATTENDANCE_STATUS_LABELS } from "@/src/lib/constants";
+
+// ─── Bulk Attendance Types ────────────────────────────────
+
+interface BulkEntry {
+  employeeId: string;
+  employeeName: string;
+  employeeCode: string;
+  checkIn: string;
+  checkOut: string;
+  status: string;
+  notes: string;
+}
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -145,6 +167,12 @@ export default function AttendancePage() {
   const [deletingRecord, setDeletingRecord] = useState<Attendance | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Bulk attendance state
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkDate, setBulkDate] = useState(new Date().toISOString().split("T")[0]);
+  const [bulkEntries, setBulkEntries] = useState<BulkEntry[]>([]);
+  const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
 
   // ─── Form ──────────────────────────────────────────────
 
@@ -302,6 +330,87 @@ export default function AttendancePage() {
       }
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  // ─── Bulk Attendance Handlers ──────────────────────────
+
+  const openBulkDialog = () => {
+    const today = new Date().toISOString().split("T")[0];
+    setBulkDate(today);
+    setBulkEntries(
+      employees.map((e) => ({
+        employeeId: e.id,
+        employeeName: e.fullName,
+        employeeCode: e.code,
+        checkIn: "08:00",
+        checkOut: "17:00",
+        status: "PRESENT",
+        notes: "",
+      }))
+    );
+    setBulkOpen(true);
+  };
+
+  const updateBulkEntry = (index: number, field: keyof BulkEntry, value: string) => {
+    setBulkEntries((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: value };
+      // If status is not PRESENT/LATE, clear check-in/check-out
+      if (field === "status" && !["PRESENT", "LATE"].includes(value)) {
+        updated[index].checkIn = "";
+        updated[index].checkOut = "";
+      }
+      // If status changed to PRESENT, set default times
+      if (field === "status" && value === "PRESENT" && !updated[index].checkIn) {
+        updated[index].checkIn = "08:00";
+        updated[index].checkOut = "17:00";
+      }
+      return updated;
+    });
+  };
+
+  const setAllPresent = () => {
+    setBulkEntries((prev) =>
+      prev.map((e) => ({
+        ...e,
+        checkIn: "08:00",
+        checkOut: "17:00",
+        status: "PRESENT",
+        notes: "",
+      }))
+    );
+  };
+
+  const handleBulkSubmit = async () => {
+    if (!bulkDate || bulkEntries.length === 0) return;
+    try {
+      setIsBulkSubmitting(true);
+      const payload = {
+        date: bulkDate,
+        entries: bulkEntries.map((e) => ({
+          employeeId: e.employeeId,
+          checkIn: e.checkIn || null,
+          checkOut: e.checkOut || null,
+          status: e.status,
+          notes: e.notes || null,
+        })),
+      };
+      const res = await axios.post("/api/attendance/bulk", payload);
+      const result = res.data.data;
+      toast.success(
+        `Berhasil: ${result.created} disimpan, ${result.skipped} dilewati (sudah ada)`
+      );
+      setBulkOpen(false);
+      fetchRecords();
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.data) {
+        toast.error(error.response.data.message || "Gagal menyimpan absensi massal");
+      } else {
+        toast.error("Gagal menyimpan absensi massal");
+      }
+    } finally {
+      setIsBulkSubmitting(false);
     }
   };
 
@@ -559,10 +668,16 @@ export default function AttendancePage() {
             }}
             searchPlaceholder="Cari karyawan..."
             actions={
-              <Button size="sm" onClick={openCreateDialog} className="gap-2">
-                <Plus className="h-4 w-4" />
-                Tambah
-              </Button>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={openBulkDialog} className="gap-2">
+                  <Users className="h-4 w-4" />
+                  Absensi Massal
+                </Button>
+                <Button size="sm" onClick={openCreateDialog} className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Tambah
+                </Button>
+              </div>
             }
           />
         </CardContent>
@@ -743,6 +858,152 @@ export default function AttendancePage() {
         isLoading={isDeleting}
         onConfirm={handleDelete}
       />
+
+      {/* Bulk Attendance Dialog */}
+      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+        <DialogContent className="sm:max-w-[900px] max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Absensi Massal
+            </DialogTitle>
+            <DialogDescription>
+              Input kehadiran seluruh karyawan sekaligus untuk satu tanggal.
+              Keterlambatan dan lembur dihitung otomatis.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Date picker + quick actions */}
+          <div className="flex flex-wrap items-end gap-3 py-2">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Tanggal Absensi</Label>
+              <Input
+                type="date"
+                value={bulkDate}
+                onChange={(e) => setBulkDate(e.target.value)}
+                className="w-[180px] h-9"
+              />
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-9 gap-2"
+              onClick={setAllPresent}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              Set Semua Hadir
+            </Button>
+            <div className="ml-auto text-xs text-muted-foreground">
+              {bulkEntries.length} karyawan
+            </div>
+          </div>
+
+          {/* Info box */}
+          <div className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+            <strong>Info:</strong> Terlambat &gt;08:00 = status otomatis &quot;Terlambat&quot;. Terlambat &gt;60 menit = &quot;Tidak Hadir&quot;.
+            Untuk Cuti/Sakit/Liburan, pilih status lalu jam masuk &amp; keluar akan dikosongkan.
+          </div>
+
+          {/* Scrollable employee table */}
+          <div className="flex-1 overflow-y-auto border rounded-lg" style={{ maxHeight: "400px" }}>
+            <Table>
+              <TableHeader className="sticky top-0 bg-background z-10">
+                <TableRow>
+                  <TableHead className="w-[180px]">Karyawan</TableHead>
+                  <TableHead className="w-[110px]">Jam Masuk</TableHead>
+                  <TableHead className="w-[110px]">Jam Keluar</TableHead>
+                  <TableHead className="w-[140px]">Status</TableHead>
+                  <TableHead>Catatan</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {bulkEntries.map((entry, idx) => (
+                  <TableRow key={entry.employeeId}>
+                    <TableCell>
+                      <div>
+                        <div className="font-medium text-sm">{entry.employeeName}</div>
+                        <div className="text-xs text-muted-foreground">{entry.employeeCode}</div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        type="time"
+                        value={entry.checkIn}
+                        onChange={(e) => updateBulkEntry(idx, "checkIn", e.target.value)}
+                        className="h-8 text-sm"
+                        disabled={!["PRESENT", "LATE"].includes(entry.status)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        type="time"
+                        value={entry.checkOut}
+                        onChange={(e) => updateBulkEntry(idx, "checkOut", e.target.value)}
+                        className="h-8 text-sm"
+                        disabled={!["PRESENT", "LATE"].includes(entry.status)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Select
+                        value={entry.status}
+                        onValueChange={(val) => { if (val) updateBulkEntry(idx, "status", val); }}
+                      >
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue>
+                            {(val: string) => ATTENDANCE_STATUS_LABELS[val] || val}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(ATTENDANCE_STATUS_LABELS).map(
+                            ([value, label]) => (
+                              <SelectItem key={value} value={value}>
+                                {label}
+                              </SelectItem>
+                            )
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        value={entry.notes}
+                        onChange={(e) => updateBulkEntry(idx, "notes", e.target.value)}
+                        placeholder="—"
+                        className="h-8 text-sm"
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setBulkOpen(false)}
+              disabled={isBulkSubmitting}
+            >
+              Batal
+            </Button>
+            <Button
+              type="button"
+              onClick={handleBulkSubmit}
+              disabled={isBulkSubmitting || !bulkDate}
+              className="gap-2"
+            >
+              {isBulkSubmitting ? "Menyimpan..." : (
+                <>
+                  <CheckCircle2 className="h-4 w-4" />
+                  Simpan Semua ({bulkEntries.length})
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
