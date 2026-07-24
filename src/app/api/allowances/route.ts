@@ -96,6 +96,22 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    if (isActive) {
+      const activeEmployees = await prisma.employee.findMany({
+        where: { status: "ACTIVE" },
+        select: { id: true },
+      });
+      if (activeEmployees.length > 0) {
+        await prisma.employeeAllowance.createMany({
+          data: activeEmployees.map((e) => ({
+            employeeId: e.id,
+            allowanceId: newAllowance.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    }
+
     return successResponse(
       { ...newAllowance, amount: Number(newAllowance.amount) },
       201

@@ -159,6 +159,32 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // Auto-assign active master deductions & allowances to the new employee
+    const [activeDeductions, activeAllowances] = await Promise.all([
+      prisma.deduction.findMany({ where: { isActive: true }, select: { id: true } }),
+      prisma.allowance.findMany({ where: { isActive: true }, select: { id: true } }),
+    ]);
+
+    if (activeDeductions.length > 0) {
+      await prisma.employeeDeduction.createMany({
+        data: activeDeductions.map((d) => ({
+          employeeId: employee.id,
+          deductionId: d.id,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    if (activeAllowances.length > 0) {
+      await prisma.employeeAllowance.createMany({
+        data: activeAllowances.map((a) => ({
+          employeeId: employee.id,
+          allowanceId: a.id,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
     return successResponse(
       { ...employee, baseSalary: Number(employee.baseSalary) },
       201

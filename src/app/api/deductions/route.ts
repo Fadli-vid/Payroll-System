@@ -96,6 +96,22 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    if (isActive) {
+      const activeEmployees = await prisma.employee.findMany({
+        where: { status: "ACTIVE" },
+        select: { id: true },
+      });
+      if (activeEmployees.length > 0) {
+        await prisma.employeeDeduction.createMany({
+          data: activeEmployees.map((e) => ({
+            employeeId: e.id,
+            deductionId: newDeduction.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    }
+
     return successResponse(
       { ...newDeduction, amount: Number(newDeduction.amount) },
       201

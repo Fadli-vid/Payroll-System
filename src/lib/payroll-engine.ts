@@ -74,8 +74,15 @@ export async function calculateSingleEmployeePayroll(
     description: `Gaji pokok posisi ${employee.position.name}`,
   });
 
-  // 2. Position Base Allowance
+  // 3. Employee & Active Master Allowances
+  const activeMasterAllowances = await prisma.allowance.findMany({
+    where: { isActive: true },
+  });
+
+  const appliedAllowanceIds = new Set<string>();
   let allowanceTotal = 0;
+
+  // 3a. Position Base Allowance
   const positionAllowance = Number(employee.position.baseAllowance);
   if (positionAllowance > 0) {
     allowanceTotal += positionAllowance;
@@ -87,9 +94,27 @@ export async function calculateSingleEmployeePayroll(
     });
   }
 
-  // 3. Employee Master Allowances
+  // 3b. Active Master Allowances
+  for (const allowance of activeMasterAllowances) {
+    appliedAllowanceIds.add(allowance.id);
+    const amt = Number(allowance.amount);
+    allowanceTotal += amt;
+    details.push({
+      component: allowance.name,
+      type: "EARNING",
+      amount: amt,
+      description: allowance.description || "Tunjangan rutin",
+    });
+  }
+
+  // 3c. Additional Employee-Specific Allowances
   for (const ea of employee.employeeAllowances) {
-    if (ea.allowance && ea.allowance.isActive) {
+    if (
+      ea.allowance &&
+      ea.allowance.isActive &&
+      !appliedAllowanceIds.has(ea.allowance.id)
+    ) {
+      appliedAllowanceIds.add(ea.allowance.id);
       const amt = Number(ea.allowance.amount);
       allowanceTotal += amt;
       details.push({
@@ -101,10 +126,35 @@ export async function calculateSingleEmployeePayroll(
     }
   }
 
-  // 4. Employee Master Deductions
+  // 4. Employee & Active Master Deductions
+  const activeMasterDeductions = await prisma.deduction.findMany({
+    where: { isActive: true },
+  });
+
+  const appliedDeductionIds = new Set<string>();
   let deductionTotal = 0;
+
+  // 4a. Active Master Deductions
+  for (const deduction of activeMasterDeductions) {
+    appliedDeductionIds.add(deduction.id);
+    const amt = Number(deduction.amount);
+    deductionTotal += amt;
+    details.push({
+      component: deduction.name,
+      type: "DEDUCTION",
+      amount: amt,
+      description: deduction.description || "Potongan rutin",
+    });
+  }
+
+  // 4b. Additional Employee-Specific Deductions
   for (const ed of employee.employeeDeductions) {
-    if (ed.deduction && ed.deduction.isActive) {
+    if (
+      ed.deduction &&
+      ed.deduction.isActive &&
+      !appliedDeductionIds.has(ed.deduction.id)
+    ) {
+      appliedDeductionIds.add(ed.deduction.id);
       const amt = Number(ed.deduction.amount);
       deductionTotal += amt;
       details.push({
