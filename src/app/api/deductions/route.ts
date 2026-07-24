@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
       return validationErrorResponse(fieldErrors);
     }
 
-    const { name, amount, description, isActive } = validatedData.data;
+    const { name, type, amount, description, isActive } = validatedData.data;
 
     // Check duplicate name
     const existing = await prisma.deduction.findUnique({
@@ -90,6 +90,7 @@ export async function POST(req: NextRequest) {
     const newDeduction = await prisma.deduction.create({
       data: {
         name,
+        type: type || "FIXED",
         amount,
         description,
         isActive,

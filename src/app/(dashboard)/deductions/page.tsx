@@ -74,6 +74,7 @@ import {
 
 interface Deduction extends DeductionFormValues {
   id: string;
+  type?: "FIXED" | "PERCENTAGE";
   createdAt: string;
   updatedAt: string;
 }
@@ -135,6 +136,7 @@ export default function DeductionsPage() {
     resolver: zodResolver(deductionSchema as any),
     defaultValues: {
       name: "",
+      type: "FIXED",
       amount: 0,
       description: "",
       isActive: true,
@@ -155,6 +157,7 @@ export default function DeductionsPage() {
     },
   });
 
+  const watchDeductionType = form.watch("type");
   const watchPenaltyType = penaltyForm.watch("type");
   const watchPenaltyMode = penaltyForm.watch("mode");
 
@@ -208,7 +211,7 @@ export default function DeductionsPage() {
 
   const openCreateDialog = () => {
     setEditingId(null);
-    form.reset({ name: "", amount: 0, description: "", isActive: true });
+    form.reset({ name: "", type: "FIXED", amount: 0, description: "", isActive: true });
     setIsDialogOpen(true);
   };
 
@@ -216,6 +219,7 @@ export default function DeductionsPage() {
     setEditingId(deduction.id);
     form.reset({
       name: deduction.name,
+      type: deduction.type || "FIXED",
       amount: deduction.amount,
       description: deduction.description || "",
       isActive: deduction.isActive,
@@ -334,12 +338,21 @@ export default function DeductionsPage() {
       sortable: true,
     },
     {
+      key: "type",
+      header: "Tipe",
+      render: (row) => (
+        <Badge variant="outline" className="text-xs">
+          {row.type === "PERCENTAGE" ? "Persentase" : "Nominal Tetap"}
+        </Badge>
+      ),
+    },
+    {
       key: "amount",
-      header: "Jumlah (Rp)",
+      header: "Jumlah / Nilai",
       sortable: true,
       render: (row) => (
         <span className="font-medium text-destructive">
-          {formatCurrency(row.amount)}
+          {row.type === "PERCENTAGE" ? `${row.amount}%` : formatCurrency(row.amount)}
         </span>
       ),
     },
@@ -660,7 +673,7 @@ export default function DeductionsPage() {
               </Label>
               <Input
                 id="name"
-                placeholder="cth. Potongan Koperasi"
+                placeholder="cth. Potongan Koperasi / Infaq"
                 {...form.register("name")}
               />
               {form.formState.errors.name && (
@@ -671,18 +684,47 @@ export default function DeductionsPage() {
             </div>
 
             <div className="space-y-2">
+              <Label>
+                Tipe Potongan <span className="text-destructive">*</span>
+              </Label>
+              <Select
+                value={watchDeductionType}
+                onValueChange={(val) => {
+                  if (val) form.setValue("type", val as "FIXED" | "PERCENTAGE", { shouldValidate: true });
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue>
+                    {(val: string) => val === "PERCENTAGE" ? "Persentase Gaji Pokok (%)" : "Nominal Tetap (Rp)"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="FIXED">Nominal Tetap (Rp)</SelectItem>
+                  <SelectItem value="PERCENTAGE">Persentase Gaji Pokok (%)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="amount">
-                Jumlah (Rp) <span className="text-destructive">*</span>
+                {watchDeductionType === "PERCENTAGE" ? "Persentase Gaji Pokok (%)" : "Jumlah (Rp)"}{" "}
+                <span className="text-destructive">*</span>
               </Label>
               <Input
                 id="amount"
                 type="number"
-                placeholder="0"
+                step={watchDeductionType === "PERCENTAGE" ? "0.01" : "1"}
+                placeholder={watchDeductionType === "PERCENTAGE" ? "cth. 2.5" : "0"}
                 {...form.register("amount")}
               />
               {form.formState.errors.amount && (
                 <p className="text-xs text-destructive">
                   {form.formState.errors.amount.message}
+                </p>
+              )}
+              {watchDeductionType === "PERCENTAGE" && (
+                <p className="text-xs text-muted-foreground">
+                  Contoh: 2.5% dari gaji pokok setiap karyawan
                 </p>
               )}
             </div>

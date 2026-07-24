@@ -137,13 +137,21 @@ export async function calculateSingleEmployeePayroll(
   // 4a. Active Master Deductions
   for (const deduction of activeMasterDeductions) {
     appliedDeductionIds.add(deduction.id);
-    const amt = Number(deduction.amount);
+    const rawVal = Number(deduction.amount);
+    const amt =
+      deduction.type === "PERCENTAGE"
+        ? Math.round(basicSalary * (rawVal / 100))
+        : rawVal;
     deductionTotal += amt;
     details.push({
       component: deduction.name,
       type: "DEDUCTION",
       amount: amt,
-      description: deduction.description || "Potongan rutin",
+      description:
+        deduction.description ||
+        (deduction.type === "PERCENTAGE"
+          ? `Potongan ${rawVal}% dari gaji pokok`
+          : "Potongan rutin"),
     });
   }
 
@@ -155,13 +163,21 @@ export async function calculateSingleEmployeePayroll(
       !appliedDeductionIds.has(ed.deduction.id)
     ) {
       appliedDeductionIds.add(ed.deduction.id);
-      const amt = Number(ed.deduction.amount);
+      const rawVal = Number(ed.deduction.amount);
+      const amt =
+        ed.deduction.type === "PERCENTAGE"
+          ? Math.round(basicSalary * (rawVal / 100))
+          : rawVal;
       deductionTotal += amt;
       details.push({
         component: ed.deduction.name,
         type: "DEDUCTION",
         amount: amt,
-        description: ed.deduction.description || "Potongan rutin",
+        description:
+          ed.deduction.description ||
+          (ed.deduction.type === "PERCENTAGE"
+            ? `Potongan ${rawVal}% dari gaji pokok`
+            : "Potongan rutin"),
       });
     }
   }

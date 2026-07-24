@@ -132,6 +132,7 @@ export interface AllowanceFormValues {
 
 export const deductionSchema = z.object({
   name: z.string().min(1, "Nama potongan wajib diisi").max(100),
+  type: z.enum(["FIXED", "PERCENTAGE"]).default("FIXED"),
   amount: z.coerce.number().min(0, "Jumlah tidak boleh negatif"),
   description: z.string().max(500).optional().or(z.literal("")),
   isActive: z.boolean().default(true),

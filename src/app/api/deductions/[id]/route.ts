@@ -50,7 +50,7 @@ export async function PUT(
       return validationErrorResponse(fieldErrors);
     }
 
-    const { name, amount, description, isActive } = validatedData.data;
+    const { name, type, amount, description, isActive } = validatedData.data;
 
     // Check if exists
     const existing = await prisma.deduction.findUnique({
@@ -77,6 +77,7 @@ export async function PUT(
       where: { id },
       data: {
         name,
+        type: type || "FIXED",
         amount,
         description,
         isActive,
