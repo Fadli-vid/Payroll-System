@@ -56,6 +56,7 @@ export async function GET() {
     await prisma.employee.deleteMany();
     await prisma.allowance.deleteMany();
     await prisma.deduction.deleteMany();
+    await prisma.penaltySetting.deleteMany();
     await prisma.position.deleteMany();
     await prisma.department.deleteMany();
 
@@ -301,6 +302,20 @@ export async function GET() {
         ],
       });
     }
+
+    // ═══════════════════════════════════════════════════════
+    // 6b. DEFAULT PENALTY SETTINGS
+    // ═══════════════════════════════════════════════════════
+    await prisma.penaltySetting.createMany({
+      data: [
+        // Late tiers
+        { type: "LATE", mode: "FIXED", value: 0,     minMinutes: 0,  maxMinutes: 10,   description: "Toleransi (tanpa denda)", isActive: true },
+        { type: "LATE", mode: "FIXED", value: 10000, minMinutes: 11, maxMinutes: 30,   description: "Terlambat ringan",        isActive: true },
+        { type: "LATE", mode: "FIXED", value: 25000, minMinutes: 31, maxMinutes: 60,   description: "Terlambat sedang",        isActive: true },
+        // Absent per-day (≈ 1/22 of basic salary)
+        { type: "ABSENT", mode: "PERCENTAGE", value: 4.55, minMinutes: 0, maxMinutes: null, description: "≈ 1/22 gaji pokok per hari absen", isActive: true },
+      ],
+    });
 
     // ═══════════════════════════════════════════════════════
     // 7. ATTENDANCE (Juli 2018 — 31 days, same pattern for all employees)

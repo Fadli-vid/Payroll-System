@@ -203,26 +203,88 @@ export async function calculateSingleEmployeePayroll(
     });
   }
 
-  // Late Penalty Deduction
-  const latePenalty = Math.round(totalLateMinutes * (hourlyRate / 60));
-  if (latePenalty > 0) {
-    deductionTotal += latePenalty;
-    details.push({
-      component: `Potongan Keterlambatan (${totalLateMinutes} menit)`,
-      type: "DEDUCTION",
-      amount: latePenalty,
-      description: `Keterlambatan total ${totalLateMinutes} menit`,
-    });
+  // 6. Configurable Penalty Deductions (from penalty_settings table)
+  const penaltySettings = await prisma.penaltySetting.findMany({
+    where: { isActive: true },
+    orderBy: { minMinutes: "asc" },
+  });
+
+  const lateSettings = penaltySettings.filter((p) => p.type === "LATE");
+  const absentSettings = penaltySettings.filter((p) => p.type === "ABSENT");
+
+  // 6a. Late Penalty — apply per-record, matching lateMinutes to tier ranges
+  let totalLatePenalty = 0;
+  let lateOccurrences = 0;
+
+  for (const att of attendances) {
+    if (att.status === "LATE" && att.lateMinutes > 0) {
+      lateOccurrences++;
+      // Find matching tier
+      for (const tier of lateSettings) {
+        const min = tier.minMinutes;
+        const max = tier.maxMinutes ?? Infinity;
+        if (att.lateMinutes >= min && att.lateMinutes <= max) {
+          if (tier.mode === "FIXED") {
+            totalLatePenalty += Number(tier.value);
+          } else {
+            // PERCENTAGE of basic salary
+            totalLatePenalty += Math.round(
+              basicSalary * (Number(tier.value) / 100)
+            );
+          }
+          break; // Only one tier matches per record
+        }
+      }
+    }
   }
 
-  // Absence Penalty Deduction (baseSalary / 22 per absent day)
-  const absencePenalty = Math.round(absentDays * (basicSalary / 22));
-  if (absencePenalty > 0) {
-    deductionTotal += absencePenalty;
+  if (totalLatePenalty > 0) {
+    deductionTotal += totalLatePenalty;
     details.push({
-      component: `Potongan Absensi (${absentDays} hari)`,
+      component: `Penalti Keterlambatan (${lateOccurrences}x, ${totalLateMinutes} menit)`,
       type: "DEDUCTION",
-      amount: absencePenalty,
+      amount: totalLatePenalty,
+      description: `Denda keterlambatan ${lateOccurrences} kejadian, total ${totalLateMinutes} menit`,
+    });
+  } else if (lateSettings.length === 0 && totalLateMinutes > 0) {
+    // Fallback: no penalty settings configured — use legacy formula
+    const legacyLatePenalty = Math.round(totalLateMinutes * (hourlyRate / 60));
+    if (legacyLatePenalty > 0) {
+      deductionTotal += legacyLatePenalty;
+      details.push({
+        component: `Potongan Keterlambatan (${totalLateMinutes} menit)`,
+        type: "DEDUCTION",
+        amount: legacyLatePenalty,
+        description: `Keterlambatan total ${totalLateMinutes} menit (formula default)`,
+      });
+    }
+  }
+
+  // 6b. Absent Penalty — apply per-day of unexcused absence
+  let totalAbsentPenalty = 0;
+
+  if (absentDays > 0 && absentSettings.length > 0) {
+    // Use the first active absent setting
+    const absentRule = absentSettings[0];
+    if (absentRule.mode === "FIXED") {
+      totalAbsentPenalty = Math.round(Number(absentRule.value) * absentDays);
+    } else {
+      // PERCENTAGE of basic salary per day
+      totalAbsentPenalty = Math.round(
+        basicSalary * (Number(absentRule.value) / 100) * absentDays
+      );
+    }
+  } else if (absentSettings.length === 0 && absentDays > 0) {
+    // Fallback: no penalty settings configured — use legacy formula
+    totalAbsentPenalty = Math.round(absentDays * (basicSalary / 22));
+  }
+
+  if (totalAbsentPenalty > 0) {
+    deductionTotal += totalAbsentPenalty;
+    details.push({
+      component: `Penalti Absensi (${absentDays} hari)`,
+      type: "DEDUCTION",
+      amount: totalAbsentPenalty,
       description: `Tanpa keterangan sebanyak ${absentDays} hari`,
     });
   }

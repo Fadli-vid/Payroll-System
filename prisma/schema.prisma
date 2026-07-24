@@ -39,6 +39,16 @@ enum PayrollDetailType {
   DEDUCTION
 }
 
+enum PenaltyType {
+  LATE
+  ABSENT
+}
+
+enum PenaltyMode {
+  FIXED
+  PERCENTAGE
+}
+
 // ─── Department ──────────────────────────────────────────
 
 model Department {
@@ -227,4 +237,21 @@ model PayrollDetail {
 
   @@index([payrollId])
   @@map("payroll_details")
+}
+
+// ─── Penalty Setting ─────────────────────────────────────
+
+model PenaltySetting {
+  id          String      @id @default(uuid())
+  type        PenaltyType
+  mode        PenaltyMode
+  value       Decimal     @db.Decimal(15, 2)
+  minMinutes  Int         @default(0)
+  maxMinutes  Int?
+  description String?
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@map("penalty_settings")
 }

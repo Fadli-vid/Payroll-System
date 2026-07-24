@@ -139,6 +139,26 @@ export const deductionSchema = z.object({
 
 export type DeductionFormValues = z.infer<typeof deductionSchema>;
 
+// ─── Penalty Setting ─────────────────────────────────────
+
+export const penaltySettingSchema = z.object({
+  type: z.enum(["LATE", "ABSENT"]),
+  mode: z.enum(["FIXED", "PERCENTAGE"]),
+  value: z.coerce.number().min(0, "Nilai tidak boleh negatif"),
+  minMinutes: z.coerce.number().min(0).default(0),
+  maxMinutes: z.coerce.number().min(0).optional().nullable(),
+  description: z.string().max(500).optional().or(z.literal("")),
+  isActive: z.boolean().default(true),
+});
+
+export type PenaltySettingFormValues = z.infer<typeof penaltySettingSchema>;
+
+export interface PenaltySetting extends PenaltySettingFormValues {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ─── Payroll ─────────────────────────────────────────────
 
 export const payrollGenerateSchema = z.object({
