@@ -58,7 +58,7 @@ import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 // Using extending interface for API response
 interface Allowance extends AllowanceFormValues {
   id: string;
-  type?: "FIXED" | "PERCENTAGE";
+  type: "FIXED" | "PERCENTAGE";
   createdAt: string;
   updatedAt: string;
 }

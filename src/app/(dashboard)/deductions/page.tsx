@@ -74,7 +74,7 @@ import {
 
 interface Deduction extends DeductionFormValues {
   id: string;
-  type?: "FIXED" | "PERCENTAGE";
+  type: "FIXED" | "PERCENTAGE";
   createdAt: string;
   updatedAt: string;
 }
