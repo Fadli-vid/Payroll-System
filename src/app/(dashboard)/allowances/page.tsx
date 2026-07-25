@@ -44,6 +44,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/src/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/src/components/ui/select";
 import { Switch } from "@/src/components/ui/switch";
 import { Badge } from "@/src/components/ui/badge";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
@@ -51,6 +58,7 @@ import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 // Using extending interface for API response
 interface Allowance extends AllowanceFormValues {
   id: string;
+  type?: "FIXED" | "PERCENTAGE";
   createdAt: string;
   updatedAt: string;
 }
@@ -79,11 +87,14 @@ export default function AllowancesPage() {
     resolver: zodResolver(allowanceSchema as any),
     defaultValues: {
       name: "",
+      type: "FIXED",
       amount: 0,
       description: "",
       isActive: true,
     },
   });
+
+  const watchAllowanceType = form.watch("type");
 
   // ─── Data Fetching ───────────────────────────────────────
   const fetchData = useCallback(async () => {
@@ -116,7 +127,7 @@ export default function AllowancesPage() {
   // ─── Handlers ────────────────────────────────────────────
   const openCreateDialog = () => {
     setEditingId(null);
-    form.reset({ name: "", amount: 0, description: "", isActive: true });
+    form.reset({ name: "", type: "FIXED", amount: 0, description: "", isActive: true });
     setIsDialogOpen(true);
   };
 
@@ -124,6 +135,7 @@ export default function AllowancesPage() {
     setEditingId(allowance.id);
     form.reset({
       name: allowance.name,
+      type: allowance.type || "FIXED",
       amount: allowance.amount,
       description: allowance.description || "",
       isActive: allowance.isActive,
@@ -175,11 +187,22 @@ export default function AllowancesPage() {
       sortable: true,
     },
     {
+      key: "type",
+      header: "Tipe",
+      render: (row) => (
+        <Badge variant="outline" className="text-xs">
+          {row.type === "PERCENTAGE" ? "Persentase" : "Nominal Tetap"}
+        </Badge>
+      ),
+    },
+    {
       key: "amount",
-      header: "Jumlah (Rp)",
+      header: "Jumlah / Nilai",
       sortable: true,
       render: (row) => (
-        <span className="font-medium">{formatCurrency(row.amount)}</span>
+        <span className="font-medium">
+          {row.type === "PERCENTAGE" ? `${row.amount}%` : formatCurrency(row.amount)}
+        </span>
       ),
     },
     {
@@ -297,7 +320,7 @@ export default function AllowancesPage() {
               </Label>
               <Input
                 id="name"
-                placeholder="cth. Tunjangan Transport"
+                placeholder="cth. Tunjangan Transport / Performance Bonus"
                 {...form.register("name")}
               />
               {form.formState.errors.name && (
@@ -308,18 +331,47 @@ export default function AllowancesPage() {
             </div>
 
             <div className="space-y-2">
+              <Label>
+                Tipe Tunjangan <span className="text-destructive">*</span>
+              </Label>
+              <Select
+                value={watchAllowanceType}
+                onValueChange={(val) => {
+                  if (val) form.setValue("type", val as "FIXED" | "PERCENTAGE", { shouldValidate: true });
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue>
+                    {(val: string) => val === "PERCENTAGE" ? "Persentase Gaji Pokok (%)" : "Nominal Tetap (Rp)"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="FIXED">Nominal Tetap (Rp)</SelectItem>
+                  <SelectItem value="PERCENTAGE">Persentase Gaji Pokok (%)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="amount">
-                Jumlah (Rp) <span className="text-destructive">*</span>
+                {watchAllowanceType === "PERCENTAGE" ? "Persentase Gaji Pokok (%)" : "Jumlah (Rp)"}{" "}
+                <span className="text-destructive">*</span>
               </Label>
               <Input
                 id="amount"
                 type="number"
-                placeholder="0"
+                step={watchAllowanceType === "PERCENTAGE" ? "0.01" : "1"}
+                placeholder={watchAllowanceType === "PERCENTAGE" ? "cth. 5.0" : "0"}
                 {...form.register("amount")}
               />
               {form.formState.errors.amount && (
                 <p className="text-xs text-destructive">
                   {form.formState.errors.amount.message}
+                </p>
+              )}
+              {watchAllowanceType === "PERCENTAGE" && (
+                <p className="text-xs text-muted-foreground">
+                  Contoh: 5.0% dari gaji pokok setiap karyawan
                 </p>
               )}
             </div>

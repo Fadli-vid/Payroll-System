@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
       return validationErrorResponse(fieldErrors);
     }
 
-    const { name, amount, description, isActive } = validatedData.data;
+    const { name, type, amount, description, isActive } = validatedData.data;
 
     // Check duplicate name
     const existing = await prisma.allowance.findUnique({
@@ -90,6 +90,7 @@ export async function POST(req: NextRequest) {
     const newAllowance = await prisma.allowance.create({
       data: {
         name,
+        type: type || "FIXED",
         amount,
         description,
         isActive,

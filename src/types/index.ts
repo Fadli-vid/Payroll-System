@@ -116,17 +116,13 @@ export interface AttendanceFormValues {
 
 export const allowanceSchema = z.object({
   name: z.string().min(1, "Nama tunjangan wajib diisi").max(100),
+  type: z.enum(["FIXED", "PERCENTAGE"]).default("FIXED"),
   amount: z.coerce.number().min(0, "Jumlah tidak boleh negatif"),
   description: z.string().max(500).optional().or(z.literal("")),
   isActive: z.boolean().default(true),
 });
 
-export interface AllowanceFormValues {
-  name: string;
-  amount: number;
-  description?: string;
-  isActive: boolean;
-}
+export type AllowanceFormValues = z.infer<typeof allowanceSchema>;
 
 // ─── Deduction ───────────────────────────────────────────
 

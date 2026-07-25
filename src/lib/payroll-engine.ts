@@ -114,13 +114,21 @@ export async function calculateSingleEmployeePayroll(
   // 3b. Active Master Allowances
   for (const allowance of activeMasterAllowances) {
     appliedAllowanceIds.add(allowance.id);
-    const amt = Number(allowance.amount);
+    const rawVal = Number(allowance.amount);
+    const amt =
+      allowance.type === "PERCENTAGE"
+        ? Math.round(basicSalary * (rawVal / 100))
+        : rawVal;
     allowanceTotal += amt;
     details.push({
       component: allowance.name,
       type: "EARNING",
       amount: amt,
-      description: allowance.description || "Tunjangan rutin",
+      description:
+        allowance.description ||
+        (allowance.type === "PERCENTAGE"
+          ? `Tunjangan ${rawVal}% dari gaji pokok`
+          : "Tunjangan rutin"),
     });
   }
 
@@ -132,13 +140,21 @@ export async function calculateSingleEmployeePayroll(
       !appliedAllowanceIds.has(ea.allowance.id)
     ) {
       appliedAllowanceIds.add(ea.allowance.id);
-      const amt = Number(ea.allowance.amount);
+      const rawVal = Number(ea.allowance.amount);
+      const amt =
+        ea.allowance.type === "PERCENTAGE"
+          ? Math.round(basicSalary * (rawVal / 100))
+          : rawVal;
       allowanceTotal += amt;
       details.push({
         component: ea.allowance.name,
         type: "EARNING",
         amount: amt,
-        description: ea.allowance.description || "Tunjangan rutin",
+        description:
+          ea.allowance.description ||
+          (ea.allowance.type === "PERCENTAGE"
+            ? `Tunjangan ${rawVal}% dari gaji pokok`
+            : "Tunjangan rutin"),
       });
     }
   }

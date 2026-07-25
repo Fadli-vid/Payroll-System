@@ -44,6 +44,11 @@ enum DeductionType {
   PERCENTAGE
 }
 
+enum AllowanceType {
+  FIXED
+  PERCENTAGE
+}
+
 enum PenaltyType {
   LATE
   ABSENT
@@ -139,13 +144,14 @@ model Attendance {
 // ─── Allowance (master) ──────────────────────────────────
 
 model Allowance {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  amount      Decimal  @db.Decimal(15, 2)
+  id          String        @id @default(uuid())
+  name        String        @unique
+  type        AllowanceType @default(FIXED)
+  amount      Decimal       @db.Decimal(15, 2)
   description String?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
   employeeAllowances EmployeeAllowance[]
 
