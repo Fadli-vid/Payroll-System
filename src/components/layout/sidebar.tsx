@@ -43,7 +43,8 @@ export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
 
-  const isEmployeeRole = pathname.startsWith("/employee/");
+  // Check if current route belongs to employee portal (/employee/...) vs admin (/employees)
+  const isEmployeeRole = pathname.startsWith("/employee/") || pathname === "/employee";
   const navItems = isEmployeeRole ? employeeNavItems : adminNavItems;
 
   return (

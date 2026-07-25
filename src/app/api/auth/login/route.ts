@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
       return errorResponse("Email/ID dan Password wajib diisi", 400);
     }
 
-    // 1. Try Admin Login first
+    // 1. Try Admin Login first (Case-insensitive check for Admin ID)
     if (verifyAdminCredentials(identityInput, passwordInput)) {
       const token = createSessionToken({
         id: "payrolladmin",
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
       return response;
     }
 
-    // 2. Try Employee Login by email and plain text password
+    // 2. Try Employee Login by email or code/NIK and password
     const employee = await verifyEmployeeCredentials(identityInput, passwordInput);
     if (employee) {
       const token = createSessionToken({

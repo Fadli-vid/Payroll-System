@@ -7,9 +7,8 @@ import {
   Menu,
   CircleDollarSign,
   LogOut,
-  UserCheck,
   ChevronDown,
-  ShieldAlert,
+  ShieldCheck,
   User,
 } from "lucide-react";
 import { Button } from "@/src/components/ui/button";
@@ -55,33 +54,29 @@ export function Header({ onMenuClick }: HeaderProps) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [userInfo, setUserInfo] = useState<UserSessionInfo | null>(null);
 
+  // Exact page title lookup
   const title =
     Object.entries(pageTitles).find(([path]) =>
-      path === "/" ? pathname === "/" : pathname.startsWith(path)
+      path === "/" ? pathname === "/" : pathname === path || pathname.startsWith(path + "/")
     )?.[1] ?? "Halaman";
 
+  // Check if current URL is under employee portal (/employee/...)
+  const isEmployeeRoute = pathname.startsWith("/employee/") || pathname === "/employee";
+
   useEffect(() => {
-    // Fetch profile info based on active path
-    if (pathname.startsWith("/employee")) {
-      fetch("/api/employee/profile")
-        .then((res) => res.json())
-        .then((res) => {
-          if (res.success && res.data) {
-            setUserInfo({
-              name: res.data.fullName,
-              email: res.data.email,
-              role: "EMPLOYEE",
-            });
-          }
-        })
-        .catch(() => {});
-    } else {
-      setUserInfo({
-        name: "Administrator",
-        email: "admin@payroll.com",
-        role: "ADMIN",
-      });
-    }
+    // Fetch actual logged in user session from server
+    fetch("/api/auth/me")
+      .then((res) => res.json())
+      .then((res) => {
+        if (res.success && res.data) {
+          setUserInfo({
+            name: res.data.name,
+            email: res.data.email,
+            role: res.data.role,
+          });
+        }
+      })
+      .catch(() => {});
   }, [pathname]);
 
   const handleLogout = async () => {
@@ -98,7 +93,7 @@ export function Header({ onMenuClick }: HeaderProps) {
     }
   };
 
-  const isEmployee = pathname.startsWith("/employee");
+  const currentRole = userInfo?.role || (isEmployeeRoute ? "EMPLOYEE" : "ADMIN");
 
   return (
     <header className="flex h-16 items-center gap-4 border-b border-border bg-card px-4 lg:px-6">
@@ -124,8 +119,8 @@ export function Header({ onMenuClick }: HeaderProps) {
       {/* Page title & Role badge */}
       <div className="hidden lg:flex items-center gap-3">
         <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
-        <Badge variant={isEmployee ? "secondary" : "default"} className="text-xs">
-          {isEmployee ? "Role: Karyawan" : "Role: Admin"}
+        <Badge variant={currentRole === "EMPLOYEE" ? "secondary" : "default"} className="text-xs">
+          {currentRole === "EMPLOYEE" ? "Role: Karyawan" : "Role: Admin"}
         </Badge>
       </div>
 
@@ -150,7 +145,7 @@ export function Header({ onMenuClick }: HeaderProps) {
               {userInfo?.name || "Pengguna"}
             </span>
             <span className="text-xs text-muted-foreground truncate max-w-[140px]">
-              {userInfo?.email || (isEmployee ? "Karyawan" : "Admin")}
+              {userInfo?.email || (currentRole === "EMPLOYEE" ? "Karyawan" : "admin@payroll.com")}
             </span>
           </div>
           <ChevronDown className="h-4 w-4 text-muted-foreground hidden sm:block" />
@@ -158,15 +153,15 @@ export function Header({ onMenuClick }: HeaderProps) {
 
         <DropdownMenuContent align="end" className="w-56">
           <DropdownMenuLabel className="flex items-center gap-2">
-            {isEmployee ? (
+            {currentRole === "EMPLOYEE" ? (
               <User className="h-4 w-4 text-primary" />
             ) : (
-              <ShieldAlert className="h-4 w-4 text-primary" />
+              <ShieldCheck className="h-4 w-4 text-primary" />
             )}
             <div className="flex flex-col overflow-hidden">
               <span className="text-sm font-medium truncate">{userInfo?.name || "Pengguna"}</span>
               <span className="text-xs font-normal text-muted-foreground truncate">
-                {userInfo?.email || (isEmployee ? "Karyawan" : "admin@payroll.com")}
+                {userInfo?.email || (currentRole === "EMPLOYEE" ? "Karyawan" : "admin@payroll.com")}
               </span>
             </div>
           </DropdownMenuLabel>
