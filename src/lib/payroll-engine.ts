@@ -1,9 +1,21 @@
 import { prisma } from "@/src/lib/prisma";
+import type {
+  Allowance,
+  Deduction,
+  PenaltySetting,
+  Attendance,
+} from "@/src/generated/prisma";
 
 export interface PayrollCalculationOptions {
   month: number;
   year: number;
   bonus?: number;
+  // Batch optimization caches (prevents N+1 database queries)
+  cachedEmployee?: any;
+  cachedMasterAllowances?: Allowance[];
+  cachedMasterDeductions?: Deduction[];
+  cachedPenaltySettings?: PenaltySetting[];
+  cachedAttendances?: Attendance[];
 }
 
 export interface PayrollCalculationResult {
@@ -26,6 +38,7 @@ export interface PayrollCalculationResult {
 
 /**
  * Calculate payroll figures and detail items for a single employee in a given month and year.
+ * Supports batch optimization via cached data options to avoid N+1 database queries.
  */
 export async function calculateSingleEmployeePayroll(
   employeeId: string,
@@ -33,24 +46,26 @@ export async function calculateSingleEmployeePayroll(
 ): Promise<PayrollCalculationResult | null> {
   const { month, year, bonus = 0 } = options;
 
-  // 1. Fetch employee details with position and assigned allowances/deductions
-  const employee = await prisma.employee.findUnique({
-    where: { id: employeeId },
-    include: {
-      position: true,
-      department: true,
-      employeeAllowances: {
-        include: {
-          allowance: true,
+  // 1. Fetch employee details with position & assigned allowances/deductions (or use batch cache)
+  const employee =
+    options.cachedEmployee ??
+    (await prisma.employee.findUnique({
+      where: { id: employeeId },
+      include: {
+        position: true,
+        department: true,
+        employeeAllowances: {
+          include: {
+            allowance: true,
+          },
+        },
+        employeeDeductions: {
+          include: {
+            deduction: true,
+          },
         },
       },
-      employeeDeductions: {
-        include: {
-          deduction: true,
-        },
-      },
-    },
-  });
+    }));
 
   if (!employee || employee.status !== "ACTIVE") {
     return null;
@@ -74,10 +89,12 @@ export async function calculateSingleEmployeePayroll(
     description: `Gaji pokok posisi ${employee.position.name}`,
   });
 
-  // 3. Employee & Active Master Allowances
-  const activeMasterAllowances = await prisma.allowance.findMany({
-    where: { isActive: true },
-  });
+  // 3. Employee & Active Master Allowances (use batch cache if provided)
+  const activeMasterAllowances: Allowance[] =
+    options.cachedMasterAllowances ??
+    (await prisma.allowance.findMany({
+      where: { isActive: true },
+    }));
 
   const appliedAllowanceIds = new Set<string>();
   let allowanceTotal = 0;
@@ -126,10 +143,12 @@ export async function calculateSingleEmployeePayroll(
     }
   }
 
-  // 4. Employee & Active Master Deductions
-  const activeMasterDeductions = await prisma.deduction.findMany({
-    where: { isActive: true },
-  });
+  // 4. Employee & Active Master Deductions (use batch cache if provided)
+  const activeMasterDeductions: Deduction[] =
+    options.cachedMasterDeductions ??
+    (await prisma.deduction.findMany({
+      where: { isActive: true },
+    }));
 
   const appliedDeductionIds = new Set<string>();
   let deductionTotal = 0;
@@ -182,19 +201,21 @@ export async function calculateSingleEmployeePayroll(
     }
   }
 
-  // 5. Attendance calculations for month/year
+  // 5. Attendance calculations for month/year (use batch cache if provided)
   const startDate = new Date(Date.UTC(year, month - 1, 1));
   const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
 
-  const attendances = await prisma.attendance.findMany({
-    where: {
-      employeeId,
-      date: {
-        gte: startDate,
-        lte: endDate,
+  const attendances: Attendance[] =
+    options.cachedAttendances ??
+    (await prisma.attendance.findMany({
+      where: {
+        employeeId,
+        date: {
+          gte: startDate,
+          lte: endDate,
+        },
       },
-    },
-  });
+    }));
 
   let totalOvertimeHours = 0;
   let totalLateMinutes = 0;
@@ -219,11 +240,13 @@ export async function calculateSingleEmployeePayroll(
     });
   }
 
-  // 6. Configurable Penalty Deductions (from penalty_settings table)
-  const penaltySettings = await prisma.penaltySetting.findMany({
-    where: { isActive: true },
-    orderBy: { minMinutes: "asc" },
-  });
+  // 6. Configurable Penalty Deductions (use batch cache if provided)
+  const penaltySettings: PenaltySetting[] =
+    options.cachedPenaltySettings ??
+    (await prisma.penaltySetting.findMany({
+      where: { isActive: true },
+      orderBy: { minMinutes: "asc" },
+    }));
 
   const lateSettings = penaltySettings.filter((p) => p.type === "LATE");
   const absentSettings = penaltySettings.filter((p) => p.type === "ABSENT");
@@ -420,6 +443,7 @@ export async function savePayrollRecord(
 
 /**
  * Generate payroll batch for all active employees (or filtered by department) in a target month and year.
+ * Highly optimized with bulk data pre-fetching (1 single bulk query set) to prevent N+1 queries.
  */
 export async function generateBatchPayroll(
   month: number,
@@ -434,10 +458,65 @@ export async function generateBatchPayroll(
     whereClause.departmentId = departmentId;
   }
 
+  // 1. Bulk-fetch all active employees with full relations in ONE query
   const activeEmployees = await prisma.employee.findMany({
     where: whereClause,
-    select: { id: true, fullName: true },
+    include: {
+      position: true,
+      department: true,
+      employeeAllowances: {
+        include: {
+          allowance: true,
+        },
+      },
+      employeeDeductions: {
+        include: {
+          deduction: true,
+        },
+      },
+    },
   });
+
+  if (activeEmployees.length === 0) {
+    return {
+      totalEmployees: 0,
+      processedCount: 0,
+      skippedCount: 0,
+      errors: [],
+    };
+  }
+
+  // 2. Pre-fetch master data and all attendances for the entire batch concurrently in 1 Promise.all
+  const startDate = new Date(Date.UTC(year, month - 1, 1));
+  const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+  const employeeIds = activeEmployees.map((e) => e.id);
+
+  const [masterAllowances, masterDeductions, penaltySettings, allAttendances] =
+    await Promise.all([
+      prisma.allowance.findMany({ where: { isActive: true } }),
+      prisma.deduction.findMany({ where: { isActive: true } }),
+      prisma.penaltySetting.findMany({
+        where: { isActive: true },
+        orderBy: { minMinutes: "asc" },
+      }),
+      prisma.attendance.findMany({
+        where: {
+          employeeId: { in: employeeIds },
+          date: { gte: startDate, lte: endDate },
+        },
+      }),
+    ]);
+
+  // Group attendances by employeeId for O(1) in-memory lookup
+  const attendanceMap = new Map<string, typeof allAttendances>();
+  for (const att of allAttendances) {
+    let list = attendanceMap.get(att.employeeId);
+    if (!list) {
+      list = [];
+      attendanceMap.set(att.employeeId, list);
+    }
+    list.push(att);
+  }
 
   let processedCount = 0;
   let skippedCount = 0;
@@ -449,6 +528,11 @@ export async function generateBatchPayroll(
         month,
         year,
         bonus: bonus || 0,
+        cachedEmployee: emp,
+        cachedMasterAllowances: masterAllowances,
+        cachedMasterDeductions: masterDeductions,
+        cachedPenaltySettings: penaltySettings,
+        cachedAttendances: attendanceMap.get(emp.id) || [],
       });
 
       if (calc) {
