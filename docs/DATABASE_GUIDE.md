@@ -9,7 +9,7 @@ Dokumen ini berisi panduan lengkap dan rinci mengenai rancangan basis data (*dat
 1. **Primary Key**: Semua tabel menggunakan kolom `id` bertipe `String` yang di-generate secara otomatis menggunakan format `UUID`.
 2. **Audit Timestamps**: Setiap tabel dilengkapi dengan `createdAt` (`DateTime` default saat dibuat) dan `updatedAt` (`DateTime` otomatis terisi saat update).
 3. **Penamaan Tabel (SQL Mapping)**: Penamaan model Prisma dalam format *PascalCase*, dipetakan ke nama tabel SQL berformat *snake_case* jamak melalui atribut `@@map(...)` (contoh: model `Employee` dipetakan ke tabel `employees`).
-4. **Tipe Data Keuangan**: Semua atribut nominal uang (seperti `baseSalary`, `amount`, `netSalary`) menggunakan tipe `Decimal` dengan presisi `Decimal(15, 2)` untuk menghindari *floating-point rounding errors*.
+4. **Tipe Data Keuangan**: Semua atribut nominal uang (seperti `baseSalary`, `amount`, `netSalary`, `value`) menggunakan tipe `Decimal` dengan presisi `Decimal(15, 2)` untuk menghindari *floating-point rounding errors*.
 
 ---
 
@@ -40,7 +40,27 @@ Menyatakan siklus hidup (*lifecycle*) pemrosesan slip gaji bulanan:
 ### 4. `PayrollDetailType`
 Kategori item rincian gaji dalam komponen payroll:
 - `EARNING`: Komponen penambah penghasilan (tunjangan, lembur, bonus).
-- `DEDUCTION`: Komponen pengurang penghasilan (potongan BPJS, pajak, denda terlambat).
+- `DEDUCTION`: Komponen pengurang penghasilan (potongan BPJS, pajak, denda keterlambatan/absensi).
+
+### 5. `DeductionType`
+Kategori metode perhitungan potongan bulanan:
+- `FIXED`: Potongan dengan nilai nominal tetap (dalam Rupiah).
+- `PERCENTAGE`: Potongan berbasis persentase (%) dari gaji pokok karyawan.
+
+### 6. `AllowanceType`
+Kategori metode perhitungan tunjangan bulanan:
+- `FIXED`: Tunjangan dengan nilai nominal tetap (dalam Rupiah).
+- `PERCENTAGE`: Tunjangan berbasis persentase (%) dari gaji pokok karyawan.
+
+### 7. `PenaltyType`
+Kategori jenis pelanggaran presensi untuk denda/penalti:
+- `LATE`: Penalti akibat keterlambatan jam masuk kerja.
+- `ABSENT`: Penalti akibat ketidakhadiran tanpa izin / alpa.
+
+### 8. `PenaltyMode`
+Kategori metode kalkulasi denda penalti:
+- `FIXED`: Denda bernilai nominal tetap (dalam Rupiah).
+- `PERCENTAGE`: Denda berbasis persentase (%) dari gaji pokok karyawan.
 
 ---
 
@@ -134,13 +154,14 @@ Mencatat presensi harian karyawan, termasuk jam masuk/keluar dan kalkulasi keter
 ---
 
 ### 5. Model `Allowance` ➔ Tabel `allowances`
-Master data jenis-jenis tunjangan yang tersedia dalam sistem (misal: Tunjangan Makan, Tunjangan Transportasi).
+Master data jenis-jenis tunjangan yang tersedia dalam sistem (misal: Tunjangan Makan, Tunjangan Transportasi, Performance Bonus).
 
 | Nama Kolom | Tipe Data | Constraints / Default | Deskripsi & Fungsi |
 | :--- | :--- | :--- | :--- |
 | `id` | `String` | `@id`, `@default(uuid())` | Primary key unik jenis tunjangan. |
 | `name` | `String` | `@unique` | Nama tunjangan (misal: "Tunjangan Transport"). |
-| `amount` | `Decimal` | `Decimal(15,2)` | Nominal dasar tunjangan. |
+| `type` | `AllowanceType` | `@default(FIXED)` | Tipe metode tunjangan (`FIXED` nominal tetap atau `PERCENTAGE` persentase gaji). |
+| `amount` | `Decimal` | `Decimal(15,2)` | Nominal rupiah (jika FIXED) atau persentase % (jika PERCENTAGE). |
 | `description` | `String?` | Optional | Penjelasan syarat/aturan tunjangan. |
 | `isActive` | `Boolean` | `@default(true)` | Status aktif/tidaknya jenis tunjangan ini. |
 | `createdAt` | `DateTime` | `@default(now())` | Waktu dibuat. |
@@ -149,13 +170,14 @@ Master data jenis-jenis tunjangan yang tersedia dalam sistem (misal: Tunjangan M
 ---
 
 ### 6. Model `Deduction` ➔ Tabel `deductions`
-Master data jenis-jenis potongan gaji (misal: BPJS Kesehatan, BPJS Ketenagakerjaan, PPh 21).
+Master data jenis-jenis potongan gaji bulanan (misal: BPJS Kesehatan, BPJS Ketenagakerjaan, Potongan Koperasi).
 
 | Nama Kolom | Tipe Data | Constraints / Default | Deskripsi & Fungsi |
 | :--- | :--- | :--- | :--- |
 | `id` | `String` | `@id`, `@default(uuid())` | Primary key unik jenis potongan. |
 | `name` | `String` | `@unique` | Nama potongan (misal: "BPJS Kesehatan"). |
-| `amount` | `Decimal` | `Decimal(15,2)` | Nominal standar potongan. |
+| `type` | `DeductionType` | `@default(FIXED)` | Tipe metode potongan (`FIXED` nominal tetap atau `PERCENTAGE` persentase gaji). |
+| `amount` | `Decimal` | `Decimal(15,2)` | Nominal rupiah (jika FIXED) atau persentase % (jika PERCENTAGE). |
 | `description` | `String?` | Optional | Penjelasan aturan/kalkulasi potongan. |
 | `isActive` | `Boolean` | `@default(true)` | Status aktif/tidaknya jenis potongan ini. |
 | `createdAt` | `DateTime` | `@default(now())` | Waktu dibuat. |
@@ -175,7 +197,7 @@ Tabel penghubung (*junction table / Many-to-Many*) untuk memetakan tunjangan man
 | `updatedAt` | `DateTime` | `@updatedAt` | Waktu pengalokasian diperbarui. |
 
 **Constraints Khusus**:
-- `@@unique([employeeId, allowanceId])`: Kombinasi karyawan dan jenis tunjangan bersifat unik (tidak bisa membuat tunjangan ganda yang sama untuk 1 karyawan).
+- `@@unique([employeeId, allowanceId])`: Kombinasi karyawan dan jenis tunjangan bersifat unik.
 
 ---
 
@@ -226,12 +248,30 @@ Detail item rincian gaji (breakdown) yang membentuk sebuah record `Payroll`. Men
 | :--- | :--- | :--- | :--- |
 | `id` | `String` | `@id`, `@default(uuid())` | Primary key unik detail penggajian. |
 | `payrollId` | `String` | Foreign Key (Cascade Delete), `@index` | ID referensi ke header `Payroll`. |
-| `component` | `String` | - | Nama komponen (misal: "Tunjangan Transport", "Uang Lembur", "Potongan BPJS"). |
+| `component` | `String` | - | Nama komponen (misal: "Tunjangan Transport", "Uang Lembur", "Potongan BPJS", "Penalti Keterlambatan"). |
 | `type` | `PayrollDetailType` | - | Kategori komponen (`EARNING` atau `DEDUCTION`). |
 | `amount` | `Decimal` | `Decimal(15,2)` | Nominal angka untuk komponen tersebut. |
 | `description` | `String?` | Optional | Catatan atau rincian rumus perhitungan komponen. |
 | `createdAt` | `DateTime` | `@default(now())` | Waktu baris detail dibuat. |
 | `updatedAt` | `DateTime` | `@updatedAt` | Waktu baris detail diperbarui. |
+
+---
+
+### 11. Model `PenaltySetting` ➔ Tabel `penalty_settings`
+Mengelola aturan dan pengaturan penalti/denda presensi karyawan untuk keterlambatan bertingkat (tier) dan ketidakhadiran (alpa), terpisah dari master potongan bulanan.
+
+| Nama Kolom | Tipe Data | Constraints / Default | Deskripsi & Fungsi |
+| :--- | :--- | :--- | :--- |
+| `id` | `String` | `@id`, `@default(uuid())` | Primary key unik aturan penalti. |
+| `type` | `PenaltyType` | - | Jenis penalti (`LATE` untuk terlambat, `ABSENT` untuk alpa). |
+| `mode` | `PenaltyMode` | - | Mode perhitungan denda (`FIXED` nominal rupiah atau `PERCENTAGE` persentase gaji pokok). |
+| `value` | `Decimal` | `Decimal(15,2)` | Nilai denda (Rupiah atau persentase %). |
+| `minMinutes` | `Int` | `@default(0)` | Batas minimal menit keterlambatan (khusus tipe `LATE`). |
+| `maxMinutes` | `Int?` | Optional | Batas maksimal menit keterlambatan (null = tidak ada batas atas/tak terbatas). |
+| `description` | `String?` | Optional | Deskripsi atau nama tier penalti (misal: "Toleransi", "Terlambat Ringan"). |
+| `isActive` | `Boolean` | `@default(true)` | Status aktif/tidaknya aturan penalti ini. |
+| `createdAt` | `DateTime` | `@default(now())` | Waktu aturan dibuat. |
+| `updatedAt` | `DateTime` | `@updatedAt` | Waktu aturan diperbarui. |
 
 ---
 
@@ -254,21 +294,25 @@ erDiagram
     Deduction ||--o{ EmployeeDeduction : "dialokasikan ke"
     
     Payroll ||--o{ PayrollDetail : "memiliki rincian item"
+    
+    PenaltySetting }|--|| Payroll : "digunakan dalam kalkulasi penalti"
 ```
 
 ---
 
 ## 💡 Ringkasan Alur Kerja Data (*Data Flow*)
 
-1. **Pengaturan Master Data**:
+1. **Pengaturan Master Data & Aturan Penalti**:
    - Departemen (`Department`) dan Jabatan (`Position`) disiapkan terlebih dahulu.
-   - Jenis-jenis Tunjangan (`Allowance`) dan Potongan (`Deduction`) didaftarkan.
+   - Jenis-jenis Tunjangan (`Allowance`) dan Potongan (`Deduction`) didaftarkan dengan menentukan apakah nilainya berupa **Nominal Tetap (FIXED)** atau **Persentase Gaji (PERCENTAGE)**.
+   - Aturan Denda Presensi (`PenaltySetting`) dikonfigurasi untuk menentukan tier denda keterlambatan (menit min/max) dan denda alpa tanpa izin.
 2. **Pengelolaan Karyawan (`Employee`)**:
    - Karyawan didaftarkan dengan menetapkan Gaji Pokok (`baseSalary`), Departemen, dan Jabatan.
-   - Tunjangan rutin dan Potongan rutin dikaitkan ke karyawan melalui tabel `EmployeeAllowance` dan `EmployeeDeduction`.
-3. **Presensi Harian (`Attendance`)**:
-   - Setiap hari kerja, sistem mencatat presensi (`checkIn`, `checkOut`), menghitung `lateMinutes` dan `overtimeHours`.
+   - Tunjangan rutin dan Potongan rutin dikaitkan ke karyawan melalui tabel `EmployeeAllowance` dan `EmployeeDeduction` (serta otomatis mengaplikasikan potongan/tunjangan master aktif).
+3. **Presensi Harian & Absensi Massal (`Attendance`)**:
+   - Setiap hari kerja, sistem mencatat presensi harian atau input absensi massal (`checkIn`, `checkOut`), menghitung `lateMinutes` dan `overtimeHours` secara otomatis.
 4. **Pemrosesan Gaji Bulanan (`Payroll` & `PayrollDetail`)**:
-   - Di akhir bulan, sistem membuat record `Payroll` periode tersebut dengan status `DRAFT`.
-   - Rincian penerimaan dan potongan di-generate ke dalam `PayrollDetail` (tipe `EARNING` untuk tunjangan/lembur/bonus dan `DEDUCTION` untuk potongan).
+   - Di akhir bulan, sistem menjalankan *Generate Batch Payroll* dengan **optimasi bulk pre-fetch query**.
+   - Sistem mencocokkan record kehadiran dengan `PenaltySetting` untuk menghitung denda keterlambatan dan alpa secara otomatis.
+   - Rincian penerimaan dan potongan di-generate ke dalam `PayrollDetail` (tipe `EARNING` untuk tunjangan/lembur/bonus dan `DEDUCTION` untuk potongan rutin & penalti).
    - Setelah diperiksa, status diubah menjadi `APPROVED` lalu `PAID` saat pengiriman gaji diselesaikan.
