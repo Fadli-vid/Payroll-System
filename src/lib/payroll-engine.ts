@@ -4,7 +4,7 @@ import type {
   Deduction,
   PenaltySetting,
   Attendance,
-} from "@/src/generated/prisma";
+} from "@/src/generated/prisma/client";
 
 export interface PayrollCalculationOptions {
   month: number;
