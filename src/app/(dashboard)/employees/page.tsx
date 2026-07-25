@@ -55,6 +55,7 @@ interface Employee {
   code: string;
   fullName: string;
   email: string;
+  password?: string;
   phone: string | null;
   address: string | null;
   hireDate: string;
@@ -174,6 +175,7 @@ export default function EmployeesPage() {
       code: "",
       fullName: "",
       email: "",
+      password: "123456",
       phone: "",
       address: "",
       hireDate: new Date().toISOString().split("T")[0],
@@ -191,6 +193,7 @@ export default function EmployeesPage() {
       code: emp.code,
       fullName: emp.fullName,
       email: emp.email,
+      password: emp.password || "123456",
       phone: emp.phone ?? "",
       address: emp.address ?? "",
       hireDate: emp.hireDate.split("T")[0],
@@ -513,8 +516,8 @@ export default function EmployeesPage() {
               </div>
             </div>
 
-            {/* Row 2: Email + Phone */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Row 2: Email + Password + Phone */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="email">
                   Email <span className="text-destructive">*</span>
@@ -528,6 +531,22 @@ export default function EmployeesPage() {
                 {form.formState.errors.email && (
                   <p className="text-sm text-destructive">
                     {form.formState.errors.email.message}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">
+                  Password <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="password"
+                  type="text"
+                  placeholder="123456"
+                  {...form.register("password")}
+                />
+                {form.formState.errors.password && (
+                  <p className="text-sm text-destructive">
+                    {form.formState.errors.password.message}
                   </p>
                 )}
               </div>

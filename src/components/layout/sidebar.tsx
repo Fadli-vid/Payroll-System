@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/src/lib/utils";
 import {
-  LayoutDashboard,
   Users,
   Building2,
   Briefcase,
@@ -16,25 +15,36 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
+  CalendarDays,
+  FileText,
+  User,
 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/src/components/ui/button";
 
-const navItems = [
-  { title: "Dashboard", href: "/", icon: LayoutDashboard },
+const adminNavItems = [
   { title: "Karyawan", href: "/employees", icon: Users },
   { title: "Departemen", href: "/departments", icon: Building2 },
   { title: "Jabatan", href: "/positions", icon: Briefcase },
-  { title: "Kehadiran", href: "/attendance", icon: CalendarCheck },
+  { title: "Kehadiran Admin", href: "/attendance", icon: CalendarCheck },
   { title: "Tunjangan", href: "/allowances", icon: HandCoins },
-  { title: "Potongan", href: "/deductions", icon: Receipt },
-  { title: "Penggajian", href: "/payroll", icon: Calculator },
+  { title: "Potongan & Penalti", href: "/deductions", icon: Receipt },
+  { title: "Penggajian Batch", href: "/payroll", icon: Calculator },
   { title: "Laporan", href: "/reports", icon: FileBarChart },
+];
+
+const employeeNavItems = [
+  { title: "Kehadiran Saya", href: "/employee/attendance", icon: CalendarDays },
+  { title: "Slip Gaji Saya", href: "/employee/payslips", icon: FileText },
+  { title: "Profil Saya", href: "/employee/profile", icon: User },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+
+  const isEmployeeRole = pathname.startsWith("/employee/");
+  const navItems = isEmployeeRole ? employeeNavItems : adminNavItems;
 
   return (
     <aside
@@ -54,7 +64,7 @@ export function Sidebar() {
               PayrollSys
             </span>
             <span className="truncate text-[11px] text-muted-foreground">
-              Manajemen Penggajian
+              {isEmployeeRole ? "Portal Karyawan" : "Manajemen Admin"}
             </span>
           </div>
         )}
@@ -63,10 +73,7 @@ export function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 space-y-1 overflow-y-auto p-3">
         {navItems.map((item) => {
-          const isActive =
-            item.href === "/"
-              ? pathname === "/"
-              : pathname.startsWith(item.href);
+          const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
 
           return (
             <Link
@@ -76,7 +83,7 @@ export function Sidebar() {
                 "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
                 "hover:bg-accent hover:text-accent-foreground",
                 isActive
-                  ? "bg-primary/10 text-primary shadow-sm"
+                  ? "bg-primary/10 text-primary shadow-sm font-semibold"
                   : "text-muted-foreground"
               )}
             >

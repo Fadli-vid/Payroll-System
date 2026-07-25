@@ -12,6 +12,11 @@ datasource db {
 
 // ─── Enums ───────────────────────────────────────────────
 
+enum UserRole {
+  ADMIN
+  EMPLOYEE
+}
+
 enum EmploymentStatus {
   ACTIVE
   INACTIVE
@@ -100,6 +105,8 @@ model Employee {
   hireDate     DateTime
   status       EmploymentStatus @default(ACTIVE)
   baseSalary   Decimal          @db.Decimal(15, 2)
+  password     String           @default("123456")
+  role         UserRole         @default(EMPLOYEE)
   departmentId String
   positionId   String
   createdAt    DateTime         @default(now())

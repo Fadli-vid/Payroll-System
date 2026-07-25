@@ -145,6 +145,7 @@ export async function POST(request: NextRequest) {
         code: result.data.code,
         fullName: result.data.fullName,
         email: result.data.email,
+        password: result.data.password || "123456",
         phone: result.data.phone || null,
         address: result.data.address || null,
         hireDate: new Date(result.data.hireDate),

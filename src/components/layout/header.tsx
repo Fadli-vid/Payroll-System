@@ -1,18 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Bell,
   Menu,
-  Search,
   CircleDollarSign,
   LogOut,
   UserCheck,
   ChevronDown,
+  ShieldAlert,
+  User,
 } from "lucide-react";
 import { Button } from "@/src/components/ui/button";
-import { Input } from "@/src/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,6 +21,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/src/components/ui/dropdown-menu";
+import { Badge } from "@/src/components/ui/badge";
 import { toast } from "sonner";
 
 const pageTitles: Record<string, string> = {
@@ -28,13 +29,21 @@ const pageTitles: Record<string, string> = {
   "/employees": "Karyawan",
   "/departments": "Departemen",
   "/positions": "Jabatan",
-  "/attendance": "Kehadiran",
+  "/attendance": "Kehadiran Admin",
   "/allowances": "Tunjangan",
-  "/deductions": "Potongan",
-  "/payroll": "Penggajian",
+  "/deductions": "Potongan & Penalti",
+  "/payroll": "Penggajian Batch",
   "/reports": "Laporan",
+  "/employee/attendance": "Kehadiran Saya (Kalender)",
+  "/employee/payslips": "Slip Gaji Saya",
+  "/employee/profile": "Profil Saya",
 };
 
+interface UserSessionInfo {
+  name: string;
+  email: string;
+  role: "ADMIN" | "EMPLOYEE";
+}
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -44,11 +53,36 @@ export function Header({ onMenuClick }: HeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [userInfo, setUserInfo] = useState<UserSessionInfo | null>(null);
 
   const title =
     Object.entries(pageTitles).find(([path]) =>
       path === "/" ? pathname === "/" : pathname.startsWith(path)
     )?.[1] ?? "Halaman";
+
+  useEffect(() => {
+    // Fetch profile info based on active path
+    if (pathname.startsWith("/employee")) {
+      fetch("/api/employee/profile")
+        .then((res) => res.json())
+        .then((res) => {
+          if (res.success && res.data) {
+            setUserInfo({
+              name: res.data.fullName,
+              email: res.data.email,
+              role: "EMPLOYEE",
+            });
+          }
+        })
+        .catch(() => {});
+    } else {
+      setUserInfo({
+        name: "Administrator",
+        email: "admin@payroll.com",
+        role: "ADMIN",
+      });
+    }
+  }, [pathname]);
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -63,6 +97,8 @@ export function Header({ onMenuClick }: HeaderProps) {
       setIsLoggingOut(false);
     }
   };
+
+  const isEmployee = pathname.startsWith("/employee");
 
   return (
     <header className="flex h-16 items-center gap-4 border-b border-border bg-card px-4 lg:px-6">
@@ -85,22 +121,16 @@ export function Header({ onMenuClick }: HeaderProps) {
         <span className="text-sm font-bold">PayrollSys</span>
       </div>
 
-      {/* Page title */}
-      <div className="hidden lg:block">
+      {/* Page title & Role badge */}
+      <div className="hidden lg:flex items-center gap-3">
         <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
+        <Badge variant={isEmployee ? "secondary" : "default"} className="text-xs">
+          {isEmployee ? "Role: Karyawan" : "Role: Admin"}
+        </Badge>
       </div>
 
       {/* Spacer */}
       <div className="flex-1" />
-
-      {/* Search */}
-      <div className="hidden md:flex relative w-64">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Cari..."
-          className="pl-9 h-9 bg-muted/50"
-        />
-      </div>
 
       {/* Notifications */}
       <Button variant="ghost" size="icon" className="relative">
@@ -109,25 +139,35 @@ export function Header({ onMenuClick }: HeaderProps) {
         <span className="sr-only">Notifikasi</span>
       </Button>
 
-      {/* Admin avatar & dropdown menu */}
+      {/* User avatar & dropdown menu */}
       <DropdownMenu>
         <DropdownMenuTrigger className="flex items-center gap-2 p-1.5 hover:bg-accent rounded-full sm:rounded-lg transition-colors cursor-pointer outline-none">
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-semibold">
-            A
+            {userInfo?.name ? userInfo.name.charAt(0).toUpperCase() : "U"}
           </div>
           <div className="hidden sm:flex flex-col text-left">
-            <span className="text-sm font-medium leading-none">Admin Payroll</span>
-            <span className="text-xs text-muted-foreground">payrolladmin</span>
+            <span className="text-sm font-medium leading-none truncate max-w-[140px]">
+              {userInfo?.name || "Pengguna"}
+            </span>
+            <span className="text-xs text-muted-foreground truncate max-w-[140px]">
+              {userInfo?.email || (isEmployee ? "Karyawan" : "Admin")}
+            </span>
           </div>
           <ChevronDown className="h-4 w-4 text-muted-foreground hidden sm:block" />
         </DropdownMenuTrigger>
 
         <DropdownMenuContent align="end" className="w-56">
           <DropdownMenuLabel className="flex items-center gap-2">
-            <UserCheck className="h-4 w-4 text-primary" />
-            <div className="flex flex-col">
-              <span className="text-sm font-medium">Administrator</span>
-              <span className="text-xs font-normal text-muted-foreground">payrolladmin</span>
+            {isEmployee ? (
+              <User className="h-4 w-4 text-primary" />
+            ) : (
+              <ShieldAlert className="h-4 w-4 text-primary" />
+            )}
+            <div className="flex flex-col overflow-hidden">
+              <span className="text-sm font-medium truncate">{userInfo?.name || "Pengguna"}</span>
+              <span className="text-xs font-normal text-muted-foreground truncate">
+                {userInfo?.email || (isEmployee ? "Karyawan" : "admin@payroll.com")}
+              </span>
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -144,4 +184,3 @@ export function Header({ onMenuClick }: HeaderProps) {
     </header>
   );
 }
-

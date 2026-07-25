@@ -12,7 +12,7 @@ import { toast } from "sonner";
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectPath = searchParams.get("from") || "/";
+  const redirectPath = searchParams.get("from");
 
   const [id, setId] = useState("");
   const [password, setPassword] = useState("");
@@ -23,7 +23,7 @@ function LoginForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!id.trim() || !password) {
-      setErrorMsg("ID Admin dan Password wajib diisi");
+      setErrorMsg("Email/ID Admin dan Password wajib diisi");
       return;
     }
 
@@ -47,14 +47,19 @@ function LoginForm() {
       }
 
       if (!res.ok || !data.success) {
-        throw new Error(data.message || "Login gagal. Periksa ID Admin & Password.");
+        throw new Error(data.message || "Login gagal. Periksa Email/ID & Password Anda.");
       }
 
+      const userRole = data.data?.user?.role;
       toast.success("Selamat datang! Login berhasil.", {
-        description: "Mengalihkan ke sistem penggajian...",
+        description: `Login sebagai ${userRole === "EMPLOYEE" ? "Karyawan" : "Administrator"}...`,
       });
 
-      router.push(redirectPath);
+      // Target path based on role if no explicit redirect URL specified
+      const targetPath =
+        redirectPath || (userRole === "EMPLOYEE" ? "/employee/attendance" : "/employees");
+
+      router.push(targetPath);
       router.refresh();
     } catch (err: any) {
       setErrorMsg(err.message || "Terjadi kesalahan sistem saat login.");
@@ -69,10 +74,10 @@ function LoginForm() {
       <CardHeader className="space-y-1 pb-4">
         <CardTitle className="text-xl font-semibold flex items-center gap-2">
           <ShieldCheck className="h-5 w-5 text-primary" />
-          <span>Login Admin</span>
+          <span>Login Akun</span>
         </CardTitle>
         <CardDescription>
-          Masukkan ID Admin & Password resmi Anda.
+          Masukkan Email/ID Admin & Password Anda.
         </CardDescription>
       </CardHeader>
 
@@ -84,15 +89,15 @@ function LoginForm() {
             </div>
           )}
 
-          {/* ID Admin Input */}
+          {/* Email / ID Input */}
           <div className="space-y-2">
-            <Label htmlFor="admin-id">ID Admin</Label>
+            <Label htmlFor="admin-id">Email / ID Admin</Label>
             <div className="relative">
               <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 id="admin-id"
                 type="text"
-                placeholder="Masukkan ID Admin"
+                placeholder="Admin (payrolladmin) atau Email Karyawan"
                 value={id}
                 onChange={(e) => setId(e.target.value)}
                 className="pl-9 h-11"
@@ -132,6 +137,12 @@ function LoginForm() {
               </Button>
             </div>
           </div>
+
+          <div className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground space-y-1">
+            <p className="font-semibold text-foreground">Informasi Akses Portal:</p>
+            <p>&bull; <strong>Admin</strong>: ID <code className="text-primary font-mono">payrolladmin</code> / Pass <code className="text-primary font-mono">payrolladmin</code></p>
+            <p>&bull; <strong>Karyawan</strong>: Gunakan Email Karyawan & Pass default <code className="text-primary font-mono">123456</code> (atau sesuai yang diatur Admin)</p>
+          </div>
         </CardContent>
 
         <CardFooter className="pt-2">
@@ -147,7 +158,7 @@ function LoginForm() {
               </div>
             ) : (
               <>
-                <span>Masuk ke System</span>
+                <span>Masuk ke Sistem</span>
                 <ArrowRight className="h-4 w-4" />
               </>
             )}
@@ -172,10 +183,10 @@ export default function LoginPage() {
             <CircleDollarSign className="h-8 w-8" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">
-            PayrollSys Admin
+            PayrollSys Login
           </h1>
           <p className="text-sm text-muted-foreground max-w-xs">
-            Masuk dengan kredensial administrator untuk mengelola sistem penggajian.
+            Masuk sebagai Administrator atau Karyawan untuk mengakses sistem penggajian.
           </p>
         </div>
 

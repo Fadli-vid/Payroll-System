@@ -63,6 +63,7 @@ export const employeeSchema = z.object({
   code: z.string().min(1, "Kode karyawan wajib diisi").max(20),
   fullName: z.string().min(1, "Nama lengkap wajib diisi").max(100),
   email: z.string().email("Format email tidak valid"),
+  password: z.string().min(1, "Password wajib diisi").default("123456"),
   phone: z.string().max(20).optional().or(z.literal("")),
   address: z.string().max(500).optional().or(z.literal("")),
   hireDate: z.string().min(1, "Tanggal masuk wajib diisi"),
@@ -72,18 +73,7 @@ export const employeeSchema = z.object({
   positionId: z.string().min(1, "Jabatan wajib dipilih"),
 });
 
-export interface EmployeeFormValues {
-  code: string;
-  fullName: string;
-  email: string;
-  phone?: string;
-  address?: string;
-  hireDate: string;
-  status: "ACTIVE" | "INACTIVE" | "RESIGNED" | "TERMINATED";
-  baseSalary: number;
-  departmentId: string;
-  positionId: string;
-}
+export type EmployeeFormValues = z.infer<typeof employeeSchema>;
 
 // ─── Attendance ──────────────────────────────────────────
 
