@@ -32,7 +32,7 @@ export function proxy(request: NextRequest) {
       if (user.role === "EMPLOYEE") {
         return NextResponse.redirect(new URL("/employee/attendance", request.url));
       }
-      return NextResponse.redirect(new URL("/employees", request.url));
+      return NextResponse.redirect(new URL("/", request.url));
     }
     return NextResponse.next();
   }
@@ -68,6 +68,7 @@ export function proxy(request: NextRequest) {
       "/api/attendance",
       "/api/payroll",
       "/api/reports",
+      "/api/dashboard",
     ];
     if (adminApiPrefixes.some((prefix) => pathname.startsWith(prefix))) {
       return NextResponse.json(
@@ -90,11 +91,6 @@ export function proxy(request: NextRequest) {
     if (adminPagePrefixes.some((prefix) => pathname.startsWith(prefix))) {
       return NextResponse.redirect(new URL("/employee/attendance", request.url));
     }
-  }
-
-  // If Admin accesses `/`
-  if (user.role === "ADMIN" && pathname === "/") {
-    return NextResponse.redirect(new URL("/employees", request.url));
   }
 
   return NextResponse.next();

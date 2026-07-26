@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/src/lib/utils";
 import {
+  LayoutDashboard,
   Users,
   Building2,
   Briefcase,
@@ -23,6 +24,7 @@ import { useState } from "react";
 import { Button } from "@/src/components/ui/button";
 
 const adminNavItems = [
+  { title: "Dashboard", href: "/", icon: LayoutDashboard },
   { title: "Karyawan", href: "/employees", icon: Users },
   { title: "Departemen", href: "/departments", icon: Building2 },
   { title: "Jabatan", href: "/positions", icon: Briefcase },
@@ -74,7 +76,10 @@ export function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 space-y-1 overflow-y-auto p-3">
         {navItems.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+          const isActive =
+            item.href === "/"
+              ? pathname === "/"
+              : pathname === item.href || pathname.startsWith(item.href + "/");
 
           return (
             <Link

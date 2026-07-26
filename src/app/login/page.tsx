@@ -57,7 +57,7 @@ function LoginForm() {
 
       // Target path based on role if no explicit redirect URL specified
       const targetPath =
-        redirectPath || (userRole === "EMPLOYEE" ? "/employee/attendance" : "/employees");
+        redirectPath || (userRole === "EMPLOYEE" ? "/employee/attendance" : "/");
 
       router.push(targetPath);
       router.refresh();
