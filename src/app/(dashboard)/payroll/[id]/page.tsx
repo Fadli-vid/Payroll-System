@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { formatCurrency, formatDate } from "@/src/utils/format";
+import { formatCurrency } from "@/src/utils/format";
+import { MONTH_NAMES, PAYROLL_STATUS_LABELS } from "@/src/lib/constants";
+import { apiErrorMessage } from "@/src/lib/api-client";
 import axios from "axios";
 import { toast } from "sonner";
 
@@ -11,28 +12,16 @@ import { Card, CardContent } from "@/src/components/ui/card";
 import { Button } from "@/src/components/ui/button";
 import { Badge } from "@/src/components/ui/badge";
 import { Separator } from "@/src/components/ui/separator";
+import { ConfirmDialog } from "@/src/components/layout/confirm-dialog";
 import {
+  AlertTriangle,
   ArrowLeft,
   CheckCircle2,
   CircleDollarSign,
   Printer,
+  RefreshCcw,
   Wallet,
 } from "lucide-react";
-
-const MONTH_NAMES = [
-  "Januari",
-  "Februari",
-  "Maret",
-  "April",
-  "Mei",
-  "Juni",
-  "Juli",
-  "Agustus",
-  "September",
-  "Oktober",
-  "November",
-  "Desember",
-];
 
 interface PayrollDetailData {
   id: string;
@@ -54,6 +43,7 @@ interface PayrollData {
   bonus: number;
   netSalary: number;
   status: "DRAFT" | "APPROVED" | "PAID";
+  isStale?: boolean;
   createdAt: string;
   updatedAt: string;
   employee: {
@@ -85,6 +75,8 @@ export default function SalarySlipPage({
   const router = useRouter();
   const [payroll, setPayroll] = useState<PayrollData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [statusChange, setStatusChange] = useState<"DRAFT" | "APPROVED" | "PAID" | null>(null);
+  const [isChangingStatus, setIsChangingStatus] = useState(false);
 
   useEffect(() => {
     async function loadPayroll() {
@@ -92,8 +84,8 @@ export default function SalarySlipPage({
       try {
         const { data: res } = await axios.get(`/api/payroll/${id}`);
         setPayroll(res.data);
-      } catch (err: any) {
-        toast.error("Gagal memuat slip gaji");
+      } catch (err) {
+        toast.error(apiErrorMessage(err, "Gagal memuat slip gaji"));
         console.error(err);
       } finally {
         setIsLoading(false);
@@ -106,15 +98,20 @@ export default function SalarySlipPage({
     window.print();
   };
 
-  const handleStatusChange = async (newStatus: "APPROVED" | "PAID") => {
+  const confirmStatusChange = async () => {
+    if (!statusChange) return;
+    setIsChangingStatus(true);
     try {
-      const { data: res } = await axios.patch(`/api/payroll/${id}`, {
-        status: newStatus,
-      });
-      toast.success(`Status slip gaji diperbarui menjadi ${newStatus}`);
-      setPayroll((prev) => (prev ? { ...prev, status: newStatus } : null));
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || "Gagal memperbarui status");
+      await axios.patch(`/api/payroll/${id}`, { status: statusChange });
+      toast.success(
+        `Status slip gaji diperbarui menjadi ${PAYROLL_STATUS_LABELS[statusChange]}`
+      );
+      setPayroll((prev) => (prev ? { ...prev, status: statusChange } : null));
+      setStatusChange(null);
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Gagal memperbarui status"));
+    } finally {
+      setIsChangingStatus(false);
     }
   };
 
@@ -159,29 +156,40 @@ export default function SalarySlipPage({
           Kembali ke Daftar
         </Button>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {payroll.status === "DRAFT" && (
             <Button
               size="sm"
               variant="outline"
-              onClick={() => handleStatusChange("APPROVED")}
+              onClick={() => setStatusChange("APPROVED")}
               className="gap-2 border-blue-300 text-blue-700 hover:bg-blue-50 dark:text-blue-400"
             >
               <CheckCircle2 className="h-4 w-4" />
-              Setujui (APPROVED)
+              Setujui
             </Button>
           )}
 
           {payroll.status === "APPROVED" && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleStatusChange("PAID")}
-              className="gap-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400"
-            >
-              <Wallet className="h-4 w-4" />
-              Tandai Dibayar (PAID)
-            </Button>
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setStatusChange("PAID")}
+                className="gap-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400"
+              >
+                <Wallet className="h-4 w-4" />
+                Tandai Dibayar
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setStatusChange("DRAFT")}
+                className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50 dark:text-amber-400"
+              >
+                <RefreshCcw className="h-4 w-4" />
+                Kembalikan ke Draft
+              </Button>
+            </>
           )}
 
           <Button onClick={handlePrint} className="gap-2">
@@ -191,9 +199,21 @@ export default function SalarySlipPage({
         </div>
       </div>
 
+      {/* Stale warning */}
+      {payroll.status === "DRAFT" && payroll.isStale && (
+        <div className="flex items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300 print:hidden">
+          <AlertTriangle className="h-5 w-5 shrink-0" />
+          <span>
+            Data kehadiran periode ini berubah setelah slip di-generate — angka
+            pada slip mungkin sudah tidak akurat. Silakan generate ulang gaji
+            periode ini.
+          </span>
+        </div>
+      )}
+
       {/* Official Salary Slip Card / Print Container */}
-      <Card className="shadow-lg border border-border bg-card print:shadow-none print:border-none print:m-0">
-        <CardContent className="p-8 sm:p-10 space-y-8 print:p-0 print:space-y-6">
+      <Card className="print-area shadow-lg border border-border bg-card print:shadow-none print:border-none print:m-0">
+        <CardContent className="p-4 sm:p-10 space-y-8 print:p-0 print:space-y-6">
           {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b pb-6 border-border">
             <div className="flex items-center gap-3">
@@ -201,7 +221,7 @@ export default function SalarySlipPage({
                 <CircleDollarSign className="h-7 w-7" />
               </div>
               <div>
-                <h1 className="text-xl font-bold tracking-tight">
+                <h1 className="text-base font-bold tracking-tight sm:text-xl print:text-xl">
                   PT. PAYROLL SYSTEM INDONESIA
                 </h1>
                 <p className="text-xs text-muted-foreground">
@@ -228,14 +248,14 @@ export default function SalarySlipPage({
                       : "bg-amber-50 text-amber-700 border-amber-300 print:border-black"
                   }
                 >
-                  STATUS: {payroll.status}
+                  STATUS: {(PAYROLL_STATUS_LABELS[payroll.status] || payroll.status).toUpperCase()}
                 </Badge>
               </div>
             </div>
           </div>
 
           {/* Employee Information */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 rounded-lg bg-muted/40 print:bg-transparent print:border print:border-border text-sm">
+          <div className="grid grid-cols-1 min-[400px]:grid-cols-2 sm:grid-cols-4 print:grid-cols-4 gap-4 p-4 rounded-lg bg-muted/40 print:bg-transparent print:border print:border-border text-sm">
             <div>
               <span className="text-xs text-muted-foreground block">
                 NIP / Kode Karyawan
@@ -369,7 +389,7 @@ export default function SalarySlipPage({
           </div>
 
           {/* Signatures Footer */}
-          <div className="pt-8 grid grid-cols-2 gap-8 text-center text-xs">
+          <div className="pt-8 grid grid-cols-1 gap-8 sm:grid-cols-2 print:grid-cols-2 text-center text-xs">
             <div className="space-y-12">
               <p className="text-muted-foreground">Penerima (Karyawan),</p>
               <div className="border-b border-dashed w-3/4 mx-auto border-muted-foreground"></div>
@@ -383,6 +403,37 @@ export default function SalarySlipPage({
           </div>
         </CardContent>
       </Card>
+
+      {/* Status Change Confirm Dialog */}
+      <ConfirmDialog
+        open={statusChange !== null}
+        onOpenChange={(open) => {
+          if (!open) setStatusChange(null);
+        }}
+        onConfirm={confirmStatusChange}
+        title={
+          statusChange === "PAID"
+            ? "Tandai Dibayar"
+            : statusChange === "APPROVED"
+            ? "Setujui Gaji"
+            : "Kembalikan ke Draft"
+        }
+        description={`${payroll.employee.fullName} — ${MONTH_NAMES[payroll.month - 1]} ${payroll.year} — Gaji bersih ${formatCurrency(payroll.netSalary)}.${
+          statusChange === "PAID"
+            ? " Setelah ditandai DIBAYAR, status tidak dapat diubah lagi."
+            : ""
+        }`}
+        confirmLabel={
+          statusChange === "PAID"
+            ? "Tandai Dibayar"
+            : statusChange === "APPROVED"
+            ? "Setujui"
+            : "Kembalikan ke Draft"
+        }
+        cancelLabel="Batal"
+        variant={statusChange === "DRAFT" ? "destructive" : "default"}
+        isLoading={isChangingStatus}
+      />
     </div>
   );
 }

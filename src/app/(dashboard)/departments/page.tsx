@@ -224,7 +224,7 @@ export default function DepartmentsPage() {
           <div>
             <div className="font-medium">{row.name}</div>
             {row.description && (
-              <div className="text-xs text-muted-foreground line-clamp-1 max-w-xs">
+              <div className="text-xs text-muted-foreground line-clamp-1 max-w-[180px] sm:max-w-xs">
                 {row.description}
               </div>
             )}
@@ -250,7 +250,7 @@ export default function DepartmentsPage() {
       key: "createdAt",
       header: "Dibuat",
       sortable: true,
-      className: "w-[160px]",
+      className: "w-[160px] hidden md:table-cell",
       render: (row) => (
         <span className="text-sm text-muted-foreground">
           {formatDate(row.createdAt)}
@@ -264,7 +264,7 @@ export default function DepartmentsPage() {
       render: (row) => (
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium hover:bg-accent hover:text-accent-foreground focus-visible:outline-none"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium hover:bg-accent hover:text-accent-foreground focus-visible:outline-none max-sm:h-10 max-sm:w-10"
           >
             <span className="sr-only">Menu</span>
             <svg
@@ -397,7 +397,7 @@ export default function DepartmentsPage() {
               )}
             </div>
 
-            <DialogFooter className="gap-2 sm:gap-0 pt-2">
+            <DialogFooter className="pt-2">
               <Button
                 type="button"
                 variant="outline"

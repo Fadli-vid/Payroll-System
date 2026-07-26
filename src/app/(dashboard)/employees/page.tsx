@@ -44,8 +44,11 @@ import {
 } from "@/src/components/ui/dropdown-menu";
 import { DataTable, type Column } from "@/src/components/layout/data-table";
 import { ConfirmDialog } from "@/src/components/layout/confirm-dialog";
+import { MoneyInput } from "@/src/components/shared/money-input";
 import { employeeSchema, type EmployeeFormValues } from "@/src/types";
-import { formatDate, formatCurrency } from "@/src/utils/format";
+import { formatCurrency, todayLocalISO } from "@/src/utils/format";
+import { getEmployeeStatusVariant } from "@/src/utils/status";
+import { apiErrorMessage } from "@/src/lib/api-client";
 import { EMPLOYMENT_STATUS_LABELS } from "@/src/lib/constants";
 
 // ─── Types ───────────────────────────────────────────────
@@ -55,7 +58,6 @@ interface Employee {
   code: string;
   fullName: string;
   email: string;
-  password?: string;
   phone: string | null;
   address: string | null;
   hireDate: string;
@@ -71,6 +73,14 @@ interface Employee {
 interface DeptOrPos {
   id: string;
   name: string;
+}
+
+interface MasterComponentOption {
+  id: string;
+  name: string;
+  type: "FIXED" | "PERCENTAGE";
+  amount: number;
+  isActive: boolean;
 }
 
 // ─── Page Component ──────────────────────────────────────
@@ -90,6 +100,13 @@ export default function EmployeesPage() {
   // Lookups
   const [departments, setDepartments] = useState<DeptOrPos[]>([]);
   const [positions, setPositions] = useState<DeptOrPos[]>([]);
+  const [allowanceOptions, setAllowanceOptions] = useState<MasterComponentOption[]>([]);
+  const [deductionOptions, setDeductionOptions] = useState<MasterComponentOption[]>([]);
+
+  // Assignment tunjangan/potongan per-karyawan
+  const [selectedAllowanceIds, setSelectedAllowanceIds] = useState<string[]>([]);
+  const [selectedDeductionIds, setSelectedDeductionIds] = useState<string[]>([]);
+  const [isLoadingAssignments, setIsLoadingAssignments] = useState(false);
 
   // Dialog state
   const [formOpen, setFormOpen] = useState(false);
@@ -124,14 +141,32 @@ export default function EmployeesPage() {
   useEffect(() => {
     async function fetchLookups() {
       try {
-        const [deptRes, posRes] = await Promise.all([
+        const [deptRes, posRes, allowRes, dedRes] = await Promise.all([
           axios.get("/api/departments?pageSize=100&sortBy=name&sortOrder=asc"),
           axios.get("/api/positions?pageSize=100&sortBy=name&sortOrder=asc"),
+          axios.get("/api/allowances?pageSize=100&sortBy=name&sortOrder=asc"),
+          axios.get("/api/deductions?pageSize=100&sortBy=name&sortOrder=asc"),
         ]);
         if (deptRes.data.success) setDepartments(deptRes.data.data.data);
         if (posRes.data.success) setPositions(posRes.data.data.data);
-      } catch {
-        // Silently fail — dropdowns will just be empty
+        if (allowRes.data.success) {
+          setAllowanceOptions(
+            (allowRes.data.data.data as MasterComponentOption[]).filter(
+              (a) => a.isActive
+            )
+          );
+        }
+        if (dedRes.data.success) {
+          setDeductionOptions(
+            (dedRes.data.data.data as MasterComponentOption[]).filter(
+              (d) => d.isActive
+            )
+          );
+        }
+      } catch (err) {
+        toast.error(
+          apiErrorMessage(err, "Gagal memuat data referensi (departemen/jabatan)")
+        );
       }
     }
     fetchLookups();
@@ -175,25 +210,28 @@ export default function EmployeesPage() {
       code: "",
       fullName: "",
       email: "",
-      password: "123456",
+      password: "",
       phone: "",
       address: "",
-      hireDate: new Date().toISOString().split("T")[0],
+      hireDate: todayLocalISO(),
       status: "ACTIVE",
       baseSalary: 0,
       departmentId: "",
       positionId: "",
     });
+    // Default: karyawan baru menerima semua master aktif (perilaku auto-link)
+    setSelectedAllowanceIds(allowanceOptions.map((a) => a.id));
+    setSelectedDeductionIds(deductionOptions.map((d) => d.id));
     setFormOpen(true);
   };
 
-  const openEditDialog = (emp: Employee) => {
+  const openEditDialog = async (emp: Employee) => {
     setEditingEmployee(emp);
     form.reset({
       code: emp.code,
       fullName: emp.fullName,
       email: emp.email,
-      password: emp.password || "123456",
+      password: "",
       phone: emp.phone ?? "",
       address: emp.address ?? "",
       hireDate: emp.hireDate.split("T")[0],
@@ -203,6 +241,31 @@ export default function EmployeesPage() {
       positionId: emp.positionId,
     });
     setFormOpen(true);
+
+    // Muat assignment tunjangan/potongan karyawan ini
+    setIsLoadingAssignments(true);
+    setSelectedAllowanceIds([]);
+    setSelectedDeductionIds([]);
+    try {
+      const { data: res } = await axios.get(`/api/employees/${emp.id}`);
+      const detail = res.data;
+      setSelectedAllowanceIds(
+        (detail?.employeeAllowances ?? []).map(
+          (ea: { allowanceId: string }) => ea.allowanceId
+        )
+      );
+      setSelectedDeductionIds(
+        (detail?.employeeDeductions ?? []).map(
+          (ed: { deductionId: string }) => ed.deductionId
+        )
+      );
+    } catch (err) {
+      toast.error(
+        apiErrorMessage(err, "Gagal memuat tunjangan/potongan karyawan")
+      );
+    } finally {
+      setIsLoadingAssignments(false);
+    }
   };
 
   const openDeleteDialog = (emp: Employee) => {
@@ -214,11 +277,19 @@ export default function EmployeesPage() {
     try {
       setIsSubmitting(true);
 
+      const payload = {
+        ...values,
+        // Kosong = jangan ubah password (edit) / pakai default awal (create)
+        password: values.password || undefined,
+        allowanceIds: selectedAllowanceIds,
+        deductionIds: selectedDeductionIds,
+      };
+
       if (editingEmployee) {
-        await axios.put(`/api/employees/${editingEmployee.id}`, values);
+        await axios.put(`/api/employees/${editingEmployee.id}`, payload);
         toast.success("Karyawan berhasil diperbarui");
       } else {
-        await axios.post("/api/employees", values);
+        await axios.post("/api/employees", payload);
         toast.success("Karyawan berhasil ditambahkan");
       }
 
@@ -263,23 +334,6 @@ export default function EmployeesPage() {
       setIsDeleting(false);
     }
   };
-
-  // ─── Status Badge Variant ─────────────────────────────
-
-  function getStatusVariant(status: string) {
-    switch (status) {
-      case "ACTIVE":
-        return "default";
-      case "INACTIVE":
-        return "secondary";
-      case "RESIGNED":
-        return "outline";
-      case "TERMINATED":
-        return "destructive";
-      default:
-        return "secondary";
-    }
-  }
 
   // ─── Table Columns ────────────────────────────────────
 
@@ -342,7 +396,7 @@ export default function EmployeesPage() {
       sortable: true,
       className: "w-[120px]",
       render: (row) => (
-        <Badge variant={getStatusVariant(row.status)} className="text-xs">
+        <Badge variant={getEmployeeStatusVariant(row.status)} className="text-xs">
           {EMPLOYMENT_STATUS_LABELS[row.status] ?? row.status}
         </Badge>
       ),
@@ -354,7 +408,7 @@ export default function EmployeesPage() {
       render: (row) => (
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium hover:bg-accent hover:text-accent-foreground focus-visible:outline-none"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium hover:bg-accent hover:text-accent-foreground focus-visible:outline-none max-sm:h-10 max-sm:w-10"
           >
             <span className="sr-only">Menu</span>
             <svg
@@ -469,7 +523,7 @@ export default function EmployeesPage() {
 
       {/* Create / Edit Dialog */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
             <DialogTitle>
               {editingEmployee ? "Edit Karyawan" : "Tambah Karyawan"}
@@ -535,13 +589,16 @@ export default function EmployeesPage() {
                 )}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="password">
-                  Password <span className="text-destructive">*</span>
-                </Label>
+                <Label htmlFor="password">Password</Label>
                 <Input
                   id="password"
-                  type="text"
-                  placeholder="123456"
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder={
+                    editingEmployee
+                      ? "Kosongkan jika tidak diubah"
+                      : "Kosongkan = default 123456"
+                  }
                   {...form.register("password")}
                 />
                 {form.formState.errors.password && (
@@ -677,10 +734,8 @@ export default function EmployeesPage() {
               <Label htmlFor="baseSalary">
                 Gaji Pokok (Rp) <span className="text-destructive">*</span>
               </Label>
-              <Input
+              <MoneyInput
                 id="baseSalary"
-                type="number"
-                min={0}
                 placeholder="0"
                 {...form.register("baseSalary")}
               />
@@ -690,6 +745,99 @@ export default function EmployeesPage() {
                 </p>
               )}
             </div>
+
+            {/* Row 5b: Assignment Tunjangan & Potongan */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <fieldset className="rounded-lg border p-3 max-h-40 overflow-y-auto space-y-2">
+                <legend className="px-1 text-xs font-semibold">
+                  Tunjangan Karyawan
+                </legend>
+                {isLoadingAssignments ? (
+                  <p className="text-xs text-muted-foreground">Memuat...</p>
+                ) : allowanceOptions.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Belum ada master tunjangan aktif.
+                  </p>
+                ) : (
+                  allowanceOptions.map((a) => (
+                    <label
+                      key={a.id}
+                      className="flex items-center gap-2 text-sm cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        className="accent-primary"
+                        checked={selectedAllowanceIds.includes(a.id)}
+                        onChange={(e) =>
+                          setSelectedAllowanceIds((prev) =>
+                            e.target.checked
+                              ? [...prev, a.id]
+                              : prev.filter((x) => x !== a.id)
+                          )
+                        }
+                      />
+                      <span>
+                        {a.name}
+                        <span className="ml-1 text-xs text-muted-foreground">
+                          (
+                          {a.type === "PERCENTAGE"
+                            ? `${a.amount}%`
+                            : formatCurrency(a.amount)}
+                          )
+                        </span>
+                      </span>
+                    </label>
+                  ))
+                )}
+              </fieldset>
+
+              <fieldset className="rounded-lg border p-3 max-h-40 overflow-y-auto space-y-2">
+                <legend className="px-1 text-xs font-semibold">
+                  Potongan Karyawan
+                </legend>
+                {isLoadingAssignments ? (
+                  <p className="text-xs text-muted-foreground">Memuat...</p>
+                ) : deductionOptions.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Belum ada master potongan aktif.
+                  </p>
+                ) : (
+                  deductionOptions.map((d) => (
+                    <label
+                      key={d.id}
+                      className="flex items-center gap-2 text-sm cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        className="accent-primary"
+                        checked={selectedDeductionIds.includes(d.id)}
+                        onChange={(e) =>
+                          setSelectedDeductionIds((prev) =>
+                            e.target.checked
+                              ? [...prev, d.id]
+                              : prev.filter((x) => x !== d.id)
+                          )
+                        }
+                      />
+                      <span>
+                        {d.name}
+                        <span className="ml-1 text-xs text-muted-foreground">
+                          (
+                          {d.type === "PERCENTAGE"
+                            ? `${d.amount}%`
+                            : formatCurrency(d.amount)}
+                          )
+                        </span>
+                      </span>
+                    </label>
+                  ))
+                )}
+              </fieldset>
+            </div>
+            <p className="text-[11px] text-muted-foreground -mt-2">
+              Tunjangan/potongan yang dicentang akan diperhitungkan saat generate
+              gaji karyawan ini.
+            </p>
 
             {/* Row 6: Address */}
             <div className="space-y-2">
@@ -701,7 +849,7 @@ export default function EmployeesPage() {
               />
             </div>
 
-            <DialogFooter className="gap-2 sm:gap-0 pt-2">
+            <DialogFooter className="pt-2">
               <Button
                 type="button"
                 variant="outline"

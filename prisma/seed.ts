@@ -1,7 +1,10 @@
+import bcrypt from "bcryptjs";
 import { prisma } from "../src/lib/prisma";
 
 async function main() {
   console.log("Seeding database on Supabase...");
+
+  const defaultPasswordHash = await bcrypt.hash("123456", 10);
 
   // 1. Create Departments
   const hrDept = await prisma.department.upsert({
@@ -120,6 +123,7 @@ async function main() {
       hireDate: new Date("2023-01-15"),
       status: "ACTIVE",
       baseSalary: 12000000,
+      password: defaultPasswordHash,
       departmentId: engDept.id,
       positionId: srDevPos.id,
     },
@@ -136,6 +140,7 @@ async function main() {
       hireDate: new Date("2023-03-01"),
       status: "ACTIVE",
       baseSalary: 9500000,
+      password: defaultPasswordHash,
       departmentId: hrDept.id,
       positionId: managerPos.id,
     },
@@ -152,67 +157,42 @@ async function main() {
       hireDate: new Date("2023-06-10"),
       status: "ACTIVE",
       baseSalary: 7000000,
+      password: defaultPasswordHash,
       departmentId: finDept.id,
       positionId: accountantPos.id,
     },
   });
 
-  // 6. Assign Allowances & Deductions
-  await prisma.employeeAllowance.upsert({
-    where: {
-      employeeId_allowanceId: {
-        employeeId: emp1.id,
-        allowanceId: makanAllow.id,
-      },
-    },
-    update: {},
-    create: {
-      employeeId: emp1.id,
-      allowanceId: makanAllow.id,
-    },
+  // 6. Assign Allowances & Deductions ke semua karyawan
+  // (mencerminkan perilaku auto-link saat karyawan dibuat lewat API; engine
+  // payroll kini membaca tunjangan/potongan HANYA dari junction table)
+  const employees = [emp1, emp2, emp3];
+  await prisma.employeeAllowance.createMany({
+    data: employees.flatMap((emp) => [
+      { employeeId: emp.id, allowanceId: makanAllow.id },
+      { employeeId: emp.id, allowanceId: transportAllow.id },
+    ]),
+    skipDuplicates: true,
+  });
+  await prisma.employeeDeduction.createMany({
+    data: employees.flatMap((emp) => [
+      { employeeId: emp.id, deductionId: bpjsKes.id },
+      { employeeId: emp.id, deductionId: bpjsTk.id },
+    ]),
+    skipDuplicates: true,
   });
 
-  await prisma.employeeAllowance.upsert({
-    where: {
-      employeeId_allowanceId: {
-        employeeId: emp1.id,
-        allowanceId: transportAllow.id,
-      },
-    },
-    update: {},
-    create: {
-      employeeId: emp1.id,
-      allowanceId: transportAllow.id,
-    },
-  });
-
-  await prisma.employeeDeduction.upsert({
-    where: {
-      employeeId_deductionId: {
-        employeeId: emp1.id,
-        deductionId: bpjsKes.id,
-      },
-    },
-    update: {},
-    create: {
-      employeeId: emp1.id,
-      deductionId: bpjsKes.id,
-    },
-  });
-
-  await prisma.employeeDeduction.upsert({
-    where: {
-      employeeId_deductionId: {
-        employeeId: emp1.id,
-        deductionId: bpjsTk.id,
-      },
-    },
-    update: {},
-    create: {
-      employeeId: emp1.id,
-      deductionId: bpjsTk.id,
-    },
-  });
+  // 7. Default Penalty Settings (sama dengan /api/seed)
+  if ((await prisma.penaltySetting.count()) === 0) {
+    await prisma.penaltySetting.createMany({
+      data: [
+        { type: "LATE", mode: "FIXED", value: 0, minMinutes: 0, maxMinutes: 10, description: "Toleransi (tanpa denda)", isActive: true },
+        { type: "LATE", mode: "FIXED", value: 10000, minMinutes: 11, maxMinutes: 30, description: "Terlambat ringan", isActive: true },
+        { type: "LATE", mode: "FIXED", value: 25000, minMinutes: 31, maxMinutes: 60, description: "Terlambat sedang", isActive: true },
+        { type: "ABSENT", mode: "PERCENTAGE", value: 4.55, minMinutes: 0, maxMinutes: null, description: "≈ 1/22 gaji pokok per hari absen", isActive: true },
+      ],
+    });
+  }
 
   console.log("Seeding complete!");
 }

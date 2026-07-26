@@ -1,12 +1,20 @@
 import { NextRequest } from "next/server";
+import { requireAdmin } from "@/src/lib/authz";
 import { prisma } from "@/src/lib/prisma";
-import { attendanceSchema } from "@/src/types";
+import { attendanceUpdateSchema } from "@/src/types";
 import {
   successResponse,
   errorResponse,
   validationErrorResponse,
 } from "@/src/utils/api-response";
-import { calculateAttendanceMetrics } from "../route";
+import {
+  calculateAttendanceMetrics,
+  toUtcDateTime,
+} from "@/src/lib/attendance";
+import {
+  findFinalizedPayroll,
+  finalizedPayrollMessage,
+} from "@/src/lib/payroll-guard";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -17,6 +25,9 @@ interface RouteParams {
  */
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
     const attendance = await prisma.attendance.findUnique({
       where: { id },
@@ -50,9 +61,12 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
  */
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
     const body = await request.json();
-    const result = attendanceSchema.safeParse(body);
+    const result = attendanceUpdateSchema.safeParse(body);
 
     if (!result.success) {
       const fieldErrors: Record<string, string[]> = {};
@@ -85,10 +99,28 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    // Tolak perubahan bila payroll periode lama ATAU periode baru sudah final
+    const [lockedOld, lockedNew] = await Promise.all([
+      findFinalizedPayroll(existing.employeeId, existing.date),
+      findFinalizedPayroll(result.data.employeeId, new Date(result.data.date)),
+    ]);
+    const locked = lockedOld ?? lockedNew;
+    if (locked) {
+      return errorResponse(
+        finalizedPayrollMessage(locked.month, locked.year, locked.status),
+        409
+      );
+    }
+
     // Calculate metrics
     const checkIn = result.data.checkIn || null;
     const checkOut = result.data.checkOut || null;
     const metrics = calculateAttendanceMetrics(checkIn, checkOut);
+
+    // Override eksplisit menang atas hasil auto-compute — mempertahankan
+    // lembur/late yang di-set manual (mis. lembur hari libur).
+    const overtimeHours = result.data.overtimeHours ?? metrics.overtimeHours;
+    const lateMinutes = result.data.lateMinutes ?? metrics.lateMinutes;
 
     // Determine final status
     let finalStatus = result.data.status;
@@ -96,9 +128,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       finalStatus = metrics.autoStatus as typeof finalStatus;
     }
 
+    // Wall-clock time disimpan UTC-anchored (klien merender dengan getUTC*)
     const dateStr = result.data.date;
-    const checkInDt = checkIn ? new Date(`${dateStr}T${checkIn}:00`) : null;
-    const checkOutDt = checkOut ? new Date(`${dateStr}T${checkOut}:00`) : null;
+    const checkInDt = toUtcDateTime(dateStr, checkIn);
+    const checkOutDt = toUtcDateTime(dateStr, checkOut);
 
     const attendance = await prisma.attendance.update({
       where: { id },
@@ -108,8 +141,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         status: finalStatus,
         checkIn: checkInDt,
         checkOut: checkOutDt,
-        lateMinutes: metrics.lateMinutes,
-        overtimeHours: metrics.overtimeHours,
+        lateMinutes,
+        overtimeHours,
         workingHours: metrics.workingHours,
         notes: result.data.notes || null,
       },
@@ -139,11 +172,23 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
  */
 export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
 
     const existing = await prisma.attendance.findUnique({ where: { id } });
     if (!existing) {
       return errorResponse("Data kehadiran tidak ditemukan", 404);
+    }
+
+    // Tolak penghapusan bila payroll periode ini sudah APPROVED/PAID
+    const locked = await findFinalizedPayroll(existing.employeeId, existing.date);
+    if (locked) {
+      return errorResponse(
+        finalizedPayrollMessage(locked.month, locked.year, locked.status),
+        409
+      );
     }
 
     await prisma.attendance.delete({ where: { id } });

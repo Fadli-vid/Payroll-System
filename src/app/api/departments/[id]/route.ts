@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { requireAdmin } from "@/src/lib/authz";
 import { prisma } from "@/src/lib/prisma";
 import { departmentSchema } from "@/src/types";
 import {
@@ -16,6 +17,9 @@ interface RouteParams {
  */
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
     const department = await prisma.department.findUnique({
       where: { id },
@@ -44,6 +48,9 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
  */
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
     const body = await request.json();
     const result = departmentSchema.safeParse(body);
@@ -99,6 +106,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
  */
 export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
 
     // Check existence

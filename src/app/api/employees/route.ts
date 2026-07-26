@@ -1,18 +1,27 @@
 import { NextRequest } from "next/server";
+import bcrypt from "bcryptjs";
+import { requireAdmin } from "@/src/lib/authz";
 import { prisma } from "@/src/lib/prisma";
 import { employeeSchema } from "@/src/types";
 import {
   successResponse,
   errorResponse,
   validationErrorResponse,
+  zodFieldErrors,
   parseListParams,
 } from "@/src/utils/api-response";
+
+// Password awal untuk karyawan baru bila admin tidak mengisi password.
+const DEFAULT_INITIAL_PASSWORD = "123456";
 
 /**
  * GET /api/employees — list employees with search/pagination/sort/filter
  */
 export async function GET(request: NextRequest) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const url = new URL(request.url);
     const { page, pageSize, search, sortBy, sortOrder, skip } =
       parseListParams(url);
@@ -85,17 +94,14 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const body = await request.json();
     const result = employeeSchema.safeParse(body);
 
     if (!result.success) {
-      const fieldErrors: Record<string, string[]> = {};
-      for (const issue of result.error.issues) {
-        const field = issue.path.join(".");
-        if (!fieldErrors[field]) fieldErrors[field] = [];
-        fieldErrors[field].push(issue.message);
-      }
-      return validationErrorResponse(fieldErrors);
+      return validationErrorResponse(zodFieldErrors(result.error));
     }
 
     // Check for duplicate code
@@ -140,51 +146,69 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const employee = await prisma.employee.create({
-      data: {
-        code: result.data.code,
-        fullName: result.data.fullName,
-        email: result.data.email,
-        password: result.data.password || "123456",
-        phone: result.data.phone || null,
-        address: result.data.address || null,
-        hireDate: new Date(result.data.hireDate),
-        status: result.data.status,
-        baseSalary: result.data.baseSalary,
-        departmentId: result.data.departmentId,
-        positionId: result.data.positionId,
-      },
-      include: {
-        department: { select: { id: true, name: true } },
-        position: { select: { id: true, name: true } },
-      },
-    });
+    const passwordHash = await bcrypt.hash(
+      result.data.password || DEFAULT_INITIAL_PASSWORD,
+      10
+    );
 
-    // Auto-assign active master deductions & allowances to the new employee
+    // Daftar tunjangan/potongan yang di-assign: pakai pilihan eksplisit bila
+    // dikirim, selain itu default = semua master aktif (auto-link).
     const [activeDeductions, activeAllowances] = await Promise.all([
       prisma.deduction.findMany({ where: { isActive: true }, select: { id: true } }),
       prisma.allowance.findMany({ where: { isActive: true }, select: { id: true } }),
     ]);
+    const activeAllowanceIds = new Set(activeAllowances.map((a) => a.id));
+    const activeDeductionIds = new Set(activeDeductions.map((d) => d.id));
+    const allowanceIds = result.data.allowanceIds
+      ? result.data.allowanceIds.filter((id) => activeAllowanceIds.has(id))
+      : [...activeAllowanceIds];
+    const deductionIds = result.data.deductionIds
+      ? result.data.deductionIds.filter((id) => activeDeductionIds.has(id))
+      : [...activeDeductionIds];
 
-    if (activeDeductions.length > 0) {
-      await prisma.employeeDeduction.createMany({
-        data: activeDeductions.map((d) => ({
-          employeeId: employee.id,
-          deductionId: d.id,
-        })),
-        skipDuplicates: true,
+    const employee = await prisma.$transaction(async (tx) => {
+      const created = await tx.employee.create({
+        data: {
+          code: result.data.code,
+          fullName: result.data.fullName,
+          email: result.data.email,
+          password: passwordHash,
+          phone: result.data.phone || null,
+          address: result.data.address || null,
+          hireDate: new Date(result.data.hireDate),
+          status: result.data.status,
+          baseSalary: result.data.baseSalary,
+          departmentId: result.data.departmentId,
+          positionId: result.data.positionId,
+        },
+        include: {
+          department: { select: { id: true, name: true } },
+          position: { select: { id: true, name: true } },
+        },
       });
-    }
 
-    if (activeAllowances.length > 0) {
-      await prisma.employeeAllowance.createMany({
-        data: activeAllowances.map((a) => ({
-          employeeId: employee.id,
-          allowanceId: a.id,
-        })),
-        skipDuplicates: true,
-      });
-    }
+      if (deductionIds.length > 0) {
+        await tx.employeeDeduction.createMany({
+          data: deductionIds.map((deductionId) => ({
+            employeeId: created.id,
+            deductionId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      if (allowanceIds.length > 0) {
+        await tx.employeeAllowance.createMany({
+          data: allowanceIds.map((allowanceId) => ({
+            employeeId: created.id,
+            allowanceId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      return created;
+    });
 
     return successResponse(
       { ...employee, baseSalary: Number(employee.baseSalary) },

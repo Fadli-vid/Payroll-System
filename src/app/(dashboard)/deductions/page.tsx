@@ -11,6 +11,8 @@ import {
   ListQueryParams,
 } from "@/src/types";
 import { formatCurrency, formatDate } from "@/src/utils/format";
+import { apiGet, apiList, apiErrorMessage } from "@/src/lib/api-client";
+import { useDeleteConfirm } from "@/src/hooks/use-delete-confirm";
 import axios from "axios";
 import { toast } from "sonner";
 
@@ -119,17 +121,13 @@ export default function DeductionsPage() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // ═══ PENALTY STATE ═════════════════════════════════════
   const [penalties, setPenalties] = useState<PenaltySetting[]>([]);
   const [isPenaltyLoading, setIsPenaltyLoading] = useState(true);
   const [penaltyDialogOpen, setPenaltyDialogOpen] = useState(false);
   const [editingPenalty, setEditingPenalty] = useState<PenaltySetting | null>(null);
-  const [deletePenaltyOpen, setDeletePenaltyOpen] = useState(false);
-  const [deletingPenaltyId, setDeletingPenaltyId] = useState<string | null>(null);
 
   // ═══ DEDUCTION FORM ════════════════════════════════════
   const form = useForm<DeductionFormValues>({
@@ -173,13 +171,11 @@ export default function DeductionsPage() {
         sortBy,
         sortOrder,
       };
-      const { data: response } = await axios.get("/api/deductions", { params });
-
-      const result = response.data;
-      setData(Array.isArray(result?.data) ? result.data : Array.isArray(result) ? result : []);
-      setTotal(result?.meta?.total || 0);
+      const result = await apiList<Deduction>("/api/deductions", { ...params });
+      setData(result.data);
+      setTotal(result.meta.total);
     } catch (error) {
-      toast.error("Gagal mengambil data potongan");
+      toast.error(apiErrorMessage(error, "Gagal mengambil data potongan"));
       console.error(error);
     } finally {
       setIsLoading(false);
@@ -189,11 +185,10 @@ export default function DeductionsPage() {
   const fetchPenalties = useCallback(async () => {
     setIsPenaltyLoading(true);
     try {
-      const { data: res } = await axios.get("/api/penalty-settings");
-      const list = res.data;
+      const list = await apiGet<PenaltySetting[]>("/api/penalty-settings");
       setPenalties(Array.isArray(list) ? list : []);
-    } catch {
-      toast.error("Gagal memuat pengaturan penalti");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Gagal memuat pengaturan penalti"));
     } finally {
       setIsPenaltyLoading(false);
     }
@@ -227,11 +222,6 @@ export default function DeductionsPage() {
     setIsDialogOpen(true);
   };
 
-  const openDeleteDialog = (id: string) => {
-    setDeletingId(id);
-    setIsDeleteDialogOpen(true);
-  };
-
   const handleSubmit = async (values: DeductionFormValues) => {
     try {
       if (editingId) {
@@ -243,25 +233,23 @@ export default function DeductionsPage() {
       }
       setIsDialogOpen(false);
       fetchData();
-    } catch (error: any) {
+    } catch (error) {
       toast.error(
-        error.response?.data?.message || "Terjadi kesalahan saat menyimpan data"
+        apiErrorMessage(error, "Terjadi kesalahan saat menyimpan data")
       );
     }
   };
 
-  const handleDelete = async () => {
-    if (!deletingId) return;
+  const deleteConfirm = useDeleteConfirm<Deduction>(async (row) => {
     try {
-      await axios.delete(`/api/deductions/${deletingId}`);
+      await axios.delete(`/api/deductions/${row.id}`);
       toast.success("Potongan berhasil dihapus");
       fetchData();
-    } catch (error: any) {
-      toast.error(
-        error.response?.data?.message || "Gagal menghapus potongan"
-      );
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Gagal menghapus potongan"));
+      throw error;
     }
-  };
+  });
 
   // ═══ PENALTY HANDLERS ══════════════════════════════════
 
@@ -293,11 +281,6 @@ export default function DeductionsPage() {
     setPenaltyDialogOpen(true);
   };
 
-  const openPenaltyDelete = (id: string) => {
-    setDeletingPenaltyId(id);
-    setDeletePenaltyOpen(true);
-  };
-
   const handlePenaltySubmit = async (values: PenaltySettingFormValues) => {
     try {
       if (editingPenalty) {
@@ -309,25 +292,23 @@ export default function DeductionsPage() {
       }
       setPenaltyDialogOpen(false);
       fetchPenalties();
-    } catch (error: any) {
+    } catch (error) {
       toast.error(
-        error.response?.data?.message || "Gagal menyimpan pengaturan penalti"
+        apiErrorMessage(error, "Gagal menyimpan pengaturan penalti")
       );
     }
   };
 
-  const handlePenaltyDelete = async () => {
-    if (!deletingPenaltyId) return;
+  const penaltyDeleteConfirm = useDeleteConfirm<PenaltySetting>(async (p) => {
     try {
-      await axios.delete(`/api/penalty-settings/${deletingPenaltyId}`);
+      await axios.delete(`/api/penalty-settings/${p.id}`);
       toast.success("Pengaturan penalti berhasil dihapus");
       fetchPenalties();
-    } catch (error: any) {
-      toast.error(
-        error.response?.data?.message || "Gagal menghapus pengaturan penalti"
-      );
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Gagal menghapus pengaturan penalti"));
+      throw error;
     }
-  };
+  });
 
   // ═══ DEDUCTION TABLE COLUMNS ═══════════════════════════
 
@@ -340,6 +321,7 @@ export default function DeductionsPage() {
     {
       key: "type",
       header: "Tipe",
+      className: "hidden sm:table-cell",
       render: (row) => (
         <Badge variant="outline" className="text-xs">
           {row.type === "PERCENTAGE" ? "Persentase" : "Nominal Tetap"}
@@ -369,6 +351,7 @@ export default function DeductionsPage() {
       key: "createdAt",
       header: "Dibuat Pada",
       sortable: true,
+      className: "hidden md:table-cell",
       render: (row) => formatDate(row.createdAt),
     },
     {
@@ -377,7 +360,7 @@ export default function DeductionsPage() {
       render: (row) => (
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="flex h-8 w-8 items-center justify-center rounded-md border transition-colors hover:bg-muted"
+            className="flex h-8 w-8 items-center justify-center rounded-md border transition-colors hover:bg-muted max-sm:h-10 max-sm:w-10"
           >
             <MoreHorizontal className="h-4 w-4" />
             <span className="sr-only">Buka menu</span>
@@ -390,7 +373,7 @@ export default function DeductionsPage() {
               Edit
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={() => openDeleteDialog(row.id)}
+              onClick={() => deleteConfirm.request(row)}
               className="text-destructive focus:text-destructive"
             >
               <Trash2 className="mr-2 h-4 w-4" />
@@ -472,7 +455,7 @@ export default function DeductionsPage() {
       {/* ─── Penalty Settings Card ────────────────────────── */}
       <Card>
         <CardHeader className="pb-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <CardTitle className="flex items-center gap-2">
                 <ShieldAlert className="h-5 w-5" />
@@ -483,7 +466,7 @@ export default function DeductionsPage() {
                 Potongan ini dihitung otomatis saat generate penggajian.
               </CardDescription>
             </div>
-            <Button size="sm" onClick={openPenaltyCreate} className="gap-2">
+            <Button size="sm" onClick={openPenaltyCreate} className="gap-2 self-start sm:self-auto">
               <Plus className="h-4 w-4" />
               Tambah Penalti
             </Button>
@@ -510,9 +493,9 @@ export default function DeductionsPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Range Keterlambatan</TableHead>
-                      <TableHead>Mode</TableHead>
+                      <TableHead className="hidden sm:table-cell">Mode</TableHead>
                       <TableHead>Nilai Denda</TableHead>
-                      <TableHead>Deskripsi</TableHead>
+                      <TableHead className="hidden md:table-cell">Deskripsi</TableHead>
                       <TableHead className="w-[80px]">Status</TableHead>
                       <TableHead className="w-[60px]" />
                     </TableRow>
@@ -521,7 +504,7 @@ export default function DeductionsPage() {
                     {latePenalties.map((p) => (
                       <TableRow key={p.id}>
                         <TableCell className="font-medium">{formatRange(p)}</TableCell>
-                        <TableCell>
+                        <TableCell className="hidden sm:table-cell">
                           <Badge variant="outline" className="text-xs">
                             {p.mode === "FIXED" ? "Tetap" : "Persentase"}
                           </Badge>
@@ -529,7 +512,7 @@ export default function DeductionsPage() {
                         <TableCell className="font-medium text-destructive">
                           {formatPenaltyValue(p)}
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
+                        <TableCell className="hidden max-w-[280px] whitespace-normal text-sm text-muted-foreground md:table-cell">
                           {p.description || "—"}
                         </TableCell>
                         <TableCell>
@@ -539,8 +522,9 @@ export default function DeductionsPage() {
                         </TableCell>
                         <TableCell>
                           <DropdownMenu>
-                            <DropdownMenuTrigger className="flex h-7 w-7 items-center justify-center rounded-md border transition-colors hover:bg-muted">
+                            <DropdownMenuTrigger className="flex h-7 w-7 items-center justify-center rounded-md border transition-colors hover:bg-muted max-sm:h-10 max-sm:w-10">
                               <MoreHorizontal className="h-3.5 w-3.5" />
+                              <span className="sr-only">Buka menu penalti</span>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem onClick={() => openPenaltyEdit(p)}>
@@ -548,7 +532,7 @@ export default function DeductionsPage() {
                                 Edit
                               </DropdownMenuItem>
                               <DropdownMenuItem
-                                onClick={() => openPenaltyDelete(p.id)}
+                                onClick={() => penaltyDeleteConfirm.request(p)}
                                 className="text-destructive focus:text-destructive"
                               >
                                 <Trash2 className="mr-2 h-4 w-4" />
@@ -586,7 +570,7 @@ export default function DeductionsPage() {
                     <TableRow>
                       <TableHead>Mode</TableHead>
                       <TableHead>Nilai Per Hari</TableHead>
-                      <TableHead>Deskripsi</TableHead>
+                      <TableHead className="hidden md:table-cell">Deskripsi</TableHead>
                       <TableHead className="w-[80px]">Status</TableHead>
                       <TableHead className="w-[60px]" />
                     </TableRow>
@@ -602,7 +586,7 @@ export default function DeductionsPage() {
                         <TableCell className="font-medium text-destructive">
                           {formatPenaltyValue(p)} / hari
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
+                        <TableCell className="hidden max-w-[280px] whitespace-normal text-sm text-muted-foreground md:table-cell">
                           {p.description || "—"}
                         </TableCell>
                         <TableCell>
@@ -612,8 +596,9 @@ export default function DeductionsPage() {
                         </TableCell>
                         <TableCell>
                           <DropdownMenu>
-                            <DropdownMenuTrigger className="flex h-7 w-7 items-center justify-center rounded-md border transition-colors hover:bg-muted">
+                            <DropdownMenuTrigger className="flex h-7 w-7 items-center justify-center rounded-md border transition-colors hover:bg-muted max-sm:h-10 max-sm:w-10">
                               <MoreHorizontal className="h-3.5 w-3.5" />
+                              <span className="sr-only">Buka menu penalti</span>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem onClick={() => openPenaltyEdit(p)}>
@@ -621,7 +606,7 @@ export default function DeductionsPage() {
                                 Edit
                               </DropdownMenuItem>
                               <DropdownMenuItem
-                                onClick={() => openPenaltyDelete(p.id)}
+                                onClick={() => penaltyDeleteConfirm.request(p)}
                                 className="text-destructive focus:text-destructive"
                               >
                                 <Trash2 className="mr-2 h-4 w-4" />
@@ -641,8 +626,9 @@ export default function DeductionsPage() {
           {/* Info box */}
           <div className="rounded-lg bg-muted/50 px-4 py-3 text-xs text-muted-foreground space-y-1">
             <p>
-              <strong>Info:</strong> Jika tidak ada pengaturan penalti, sistem menggunakan formula default
+              <strong>Info:</strong> Jika TIDAK ADA aturan penalti sama sekali untuk suatu tipe, sistem memakai formula default
               (keterlambatan = tarif per-jam ÷ 60 × menit, absen = gaji pokok ÷ 22 × hari).
+              Jika aturan ada tetapi semuanya nonaktif, penalti tipe tersebut dianggap dimatikan (tanpa denda).
             </p>
             <p>
               Penalti terlambat dihitung <strong>per kejadian</strong> (setiap hari terlambat dicocokkan ke tier yang sesuai).
@@ -935,21 +921,23 @@ export default function DeductionsPage() {
 
       {/* ═══ DELETE DIALOGS ═════════════════════════════════ */}
       <ConfirmDialog
-        open={isDeleteDialogOpen}
-        onOpenChange={setIsDeleteDialogOpen}
-        onConfirm={handleDelete}
+        open={deleteConfirm.open}
+        onOpenChange={deleteConfirm.setOpen}
+        onConfirm={deleteConfirm.confirm}
+        isLoading={deleteConfirm.isDeleting}
         title="Hapus Potongan"
-        description="Apakah Anda yakin ingin menghapus potongan ini? Data yang dihapus tidak dapat dikembalikan."
+        description={`Apakah Anda yakin ingin menghapus potongan "${deleteConfirm.item?.name ?? ""}"? Data yang dihapus tidak dapat dikembalikan.`}
         confirmLabel="Hapus"
         cancelLabel="Batal"
       />
 
       <ConfirmDialog
-        open={deletePenaltyOpen}
-        onOpenChange={setDeletePenaltyOpen}
-        onConfirm={handlePenaltyDelete}
+        open={penaltyDeleteConfirm.open}
+        onOpenChange={penaltyDeleteConfirm.setOpen}
+        onConfirm={penaltyDeleteConfirm.confirm}
+        isLoading={penaltyDeleteConfirm.isDeleting}
         title="Hapus Pengaturan Penalti"
-        description="Apakah Anda yakin ingin menghapus pengaturan penalti ini? Jika dihapus, sistem akan menggunakan formula default saat generate penggajian."
+        description="Apakah Anda yakin ingin menghapus pengaturan penalti ini? Jika semua aturan tipe ini terhapus, sistem kembali memakai formula default saat generate penggajian."
         confirmLabel="Hapus"
         cancelLabel="Batal"
       />

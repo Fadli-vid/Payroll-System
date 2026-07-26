@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { COOKIE_NAME, parseSessionToken } from "@/src/lib/auth";
+import { COOKIE_NAME, parseSessionToken } from "@/src/lib/session";
+
+// Static asset extensions only — must never match /api/* paths.
+const STATIC_ASSET =
+  /\.(?:ico|png|jpe?g|svg|gif|webp|avif|css|js|map|txt|xml|json|woff2?|ttf|otf)$/i;
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -10,19 +14,13 @@ export function proxy(request: NextRequest) {
   // Allow static assets and Next.js internal requests
   if (
     pathname.startsWith("/_next") ||
-    pathname.startsWith("/favicon.ico") ||
-    pathname.includes(".")
+    (!pathname.startsWith("/api/") && STATIC_ASSET.test(pathname))
   ) {
     return NextResponse.next();
   }
 
   // Allow public auth API endpoints (/api/auth/login, /api/auth/logout, etc.)
   if (pathname.startsWith("/api/auth")) {
-    return NextResponse.next();
-  }
-
-  // Allow seed API endpoint for database setup
-  if (pathname === "/api/seed") {
     return NextResponse.next();
   }
 

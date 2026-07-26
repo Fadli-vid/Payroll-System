@@ -6,22 +6,22 @@ export const WORKING_HOURS = {
   TOTAL_HOURS: 9,
 } as const;
 
-export const WORKING_DAYS = [1, 2, 3, 4, 5] as const; // Monday–Friday
-
-// ─── Late Deduction Tiers (IDR) ──────────────────────────
-
-export const LATE_RULES = [
-  { minMinutes: 0, maxMinutes: 10, deduction: 0 },
-  { minMinutes: 11, maxMinutes: 30, deduction: 10_000 },
-  { minMinutes: 31, maxMinutes: 60, deduction: 25_000 },
-  // > 60 minutes → automatically marked ABSENT
-] as const;
-
 export const LATE_ABSENT_THRESHOLD = 60; // minutes
 
-// ─── Overtime Rate (IDR per hour) ────────────────────────
+// ─── Payroll Calculation Basis ───────────────────────────
 
-export const OVERTIME_RATE = 25_000;
+// Kepmenaker No. KEP-102/MEN/VI/2004 Pasal 8: upah per jam = 1/173 × upah sebulan.
+export const MONTHLY_WORK_HOURS_DIVISOR = 173;
+
+// Basis potongan absen fallback: 1 hari alpa = 1/22 gaji pokok
+// (rata-rata hari kerja per bulan untuk pola 5 hari kerja/minggu).
+export const DEFAULT_WORKING_DAYS_PER_MONTH = 22;
+
+// Pengali upah lembur (flat).
+// LIMITASI: Kepmenaker 102/2004 sebenarnya bertingkat (1,5× jam pertama,
+// 2× jam berikutnya, tarif khusus hari libur). Sistem ini memakai flat 1,5×
+// untuk semua jam lembur — penyederhanaan yang disengaja.
+export const OVERTIME_MULTIPLIER = 1.5;
 
 // ─── Attendance Status Labels (Indonesian) ───────────────
 
@@ -51,20 +51,16 @@ export const PAYROLL_STATUS_LABELS: Record<string, string> = {
   PAID: "Dibayar",
 };
 
-// ─── Payroll Detail Component Names ──────────────────────
+// ─── Year Options (dropdown filter) ──────────────────────
 
-export const PAYROLL_COMPONENTS = {
-  BASIC_SALARY: "Gaji Pokok",
-  OVERTIME: "Lembur",
-  BONUS: "Bonus",
-  LATE_DEDUCTION: "Potongan Keterlambatan",
-  ABSENT_DEDUCTION: "Potongan Ketidakhadiran",
-} as const;
-
-// ─── Pagination ──────────────────────────────────────────
-
-export const DEFAULT_PAGE_SIZE = 10;
-export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+export function getYearOptions(before = 2, after = 1): number[] {
+  const currentYear = new Date().getFullYear();
+  const years: number[] = [];
+  for (let y = currentYear - before; y <= currentYear + after; y++) {
+    years.push(y);
+  }
+  return years;
+}
 
 // ─── Month Names (Indonesian) ────────────────────────────
 

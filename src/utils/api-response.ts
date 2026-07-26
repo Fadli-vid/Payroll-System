@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { ZodError } from "zod/v4";
 import type { ApiResponse } from "@/src/types";
 
 /**
@@ -29,16 +30,39 @@ export function validationErrorResponse(
 }
 
 /**
- * Parse search/pagination params from a URL.
+ * Convert a ZodError into the { field: [messages] } shape used by
+ * validationErrorResponse and the react-hook-form clients.
  */
-export function parseListParams(url: URL) {
-  const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10));
+export function zodFieldErrors(error: ZodError): Record<string, string[]> {
+  const fieldErrors: Record<string, string[]> = {};
+  for (const issue of error.issues) {
+    const field = issue.path.join(".") || "_root";
+    if (!fieldErrors[field]) fieldErrors[field] = [];
+    fieldErrors[field].push(issue.message);
+  }
+  return fieldErrors;
+}
+
+function toFiniteInt(raw: string | null, fallback: number): number {
+  const parsed = parseInt(raw ?? "", 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/**
+ * Parse search/pagination params from a URL. NaN-safe; pageSize clamped to
+ * 1..100. Pass allowedSortFields to whitelist sortBy (falls back to createdAt).
+ */
+export function parseListParams(url: URL, allowedSortFields?: string[]) {
+  const page = Math.max(1, toFiniteInt(url.searchParams.get("page"), 1));
   const pageSize = Math.min(
     100,
-    Math.max(1, parseInt(url.searchParams.get("pageSize") || "10", 10))
+    Math.max(1, toFiniteInt(url.searchParams.get("pageSize"), 10))
   );
   const search = url.searchParams.get("search")?.trim() || "";
-  const sortBy = url.searchParams.get("sortBy") || "createdAt";
+  let sortBy = url.searchParams.get("sortBy") || "createdAt";
+  if (allowedSortFields && !allowedSortFields.includes(sortBy)) {
+    sortBy = "createdAt";
+  }
   const sortOrder =
     url.searchParams.get("sortOrder") === "asc" ? "asc" : "desc";
 

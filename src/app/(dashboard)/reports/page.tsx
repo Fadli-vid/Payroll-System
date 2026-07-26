@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { formatCurrency } from "@/src/utils/format";
+import { MONTH_NAMES, getYearOptions } from "@/src/lib/constants";
+import { apiErrorMessage } from "@/src/lib/api-client";
+import { downloadCSV } from "@/src/utils/csv";
 import axios from "axios";
 import { toast } from "sonner";
 
@@ -21,6 +24,15 @@ import {
   SelectValue,
 } from "@/src/components/ui/select";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/src/components/ui/table";
+import { StatCard } from "@/src/components/shared/stat-card";
+import {
   Building2,
   CalendarCheck,
   Clock,
@@ -32,21 +44,6 @@ import {
   Wallet,
 } from "lucide-react";
 import { PayrollReportSummary, AttendanceReportSummary } from "@/src/types";
-
-const MONTH_NAMES = [
-  "Januari",
-  "Februari",
-  "Maret",
-  "April",
-  "Mei",
-  "Juni",
-  "Juli",
-  "Agustus",
-  "September",
-  "Oktober",
-  "November",
-  "Desember",
-];
 
 export default function ReportsPage() {
   const currentDate = new Date();
@@ -70,7 +67,7 @@ export default function ReportsPage() {
       });
       setPayrollReport(res.data);
     } catch (err) {
-      toast.error("Gagal mengambil laporan penggajian");
+      toast.error(apiErrorMessage(err, "Gagal mengambil laporan penggajian"));
       console.error(err);
     } finally {
       setIsLoading(false);
@@ -86,7 +83,7 @@ export default function ReportsPage() {
       });
       setAttendanceReport(res.data);
     } catch (err) {
-      toast.error("Gagal mengambil laporan kehadiran");
+      toast.error(apiErrorMessage(err, "Gagal mengambil laporan kehadiran"));
       console.error(err);
     } finally {
       setIsLoading(false);
@@ -101,77 +98,55 @@ export default function ReportsPage() {
     }
   }, [activeTab, fetchPayrollReport, fetchAttendanceReport]);
 
-  // ─── CSV Export Handler ──────────────────────────────────
+  const periodLabel = `${MONTH_NAMES[parseInt(month, 10) - 1]} ${year}`;
+
+  const activeReportEmpty =
+    activeTab === "payroll"
+      ? !payrollReport || payrollReport.departmentBreakdown.length === 0
+      : !attendanceReport || attendanceReport.departmentBreakdown.length === 0;
+
+  // ─── CSV Export Handlers ─────────────────────────────────
   const exportPayrollCSV = () => {
-    if (!payrollReport) return;
-
-    const headers = [
-      "Departemen",
-      "Jumlah Karyawan",
-      "Total Tunjangan (Rp)",
-      "Total Potongan (Rp)",
-      "Total Gaji Bersih (Rp)",
-    ];
-
-    const rows = payrollReport.departmentBreakdown.map((d) => [
-      `"${d.departmentName}"`,
-      d.employeeCount,
-      d.totalAllowance,
-      d.totalDeduction,
-      d.totalNetSalary,
-    ]);
-
-    const csvContent =
-      "data:text/csv;charset=utf-8," +
-      [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
-
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute(
-      "download",
-      `Laporan_Penggajian_${MONTH_NAMES[parseInt(month, 10) - 1]}_${year}.csv`
+    if (!payrollReport || payrollReport.departmentBreakdown.length === 0) {
+      toast.error("Tidak ada data untuk diexport");
+      return;
+    }
+    downloadCSV(
+      `Laporan_Penggajian_${MONTH_NAMES[parseInt(month, 10) - 1]}_${year}.csv`,
+      [
+        "Departemen",
+        "Jumlah Karyawan",
+        "Total Tunjangan (Rp)",
+        "Total Potongan (Rp)",
+        "Total Gaji Bersih (Rp)",
+      ],
+      payrollReport.departmentBreakdown.map((d) => [
+        d.departmentName,
+        d.employeeCount,
+        d.totalAllowance,
+        d.totalDeduction,
+        d.totalNetSalary,
+      ])
     );
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
   const exportAttendanceCSV = () => {
-    if (!attendanceReport) return;
-
-    const headers = [
-      "Departemen",
-      "Total Log",
-      "Hadir",
-      "Terlambat",
-      "Alpa",
-      "Total Lembur (Jam)",
-    ];
-
-    const rows = attendanceReport.departmentBreakdown.map((d) => [
-      `"${d.departmentName}"`,
-      d.totalRecords,
-      d.presentCount,
-      d.lateCount,
-      d.absentCount,
-      d.totalOvertimeHours,
-    ]);
-
-    const csvContent =
-      "data:text/csv;charset=utf-8," +
-      [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
-
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute(
-      "download",
-      `Laporan_Kehadiran_${MONTH_NAMES[parseInt(month, 10) - 1]}_${year}.csv`
+    if (!attendanceReport || attendanceReport.departmentBreakdown.length === 0) {
+      toast.error("Tidak ada data untuk diexport");
+      return;
+    }
+    downloadCSV(
+      `Laporan_Kehadiran_${MONTH_NAMES[parseInt(month, 10) - 1]}_${year}.csv`,
+      ["Departemen", "Total Log", "Hadir", "Terlambat", "Alpa", "Total Lembur (Jam)"],
+      attendanceReport.departmentBreakdown.map((d) => [
+        d.departmentName,
+        d.totalRecords,
+        d.presentCount,
+        d.lateCount,
+        d.absentCount,
+        d.totalOvertimeHours,
+      ])
     );
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
   return (
@@ -182,14 +157,21 @@ export default function ReportsPage() {
           <h2 className="text-2xl font-bold tracking-tight">Laporan & Analisis</h2>
           <p className="text-muted-foreground">
             Ringkasan data rekapitulasi gaji dan tingkat kehadiran karyawan.
+            Angka uang hanya menghitung gaji berstatus Disetujui/Dibayar.
           </p>
         </div>
 
         {/* Tab Buttons */}
-        <div className="flex items-center rounded-lg border border-border bg-muted p-1 self-start sm:self-auto">
+        <div
+          role="tablist"
+          aria-label="Jenis laporan"
+          className="grid w-full grid-cols-2 items-center rounded-lg border border-border bg-muted p-1 self-start sm:inline-flex sm:w-auto sm:self-auto"
+        >
           <button
+            role="tab"
+            aria-selected={activeTab === "payroll"}
             onClick={() => setActiveTab("payroll")}
-            className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+            className={`flex items-center justify-center gap-2 rounded-md px-3 py-2 text-xs font-semibold transition-colors sm:py-1.5 ${
               activeTab === "payroll"
                 ? "bg-card text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
@@ -199,8 +181,10 @@ export default function ReportsPage() {
             Laporan Penggajian
           </button>
           <button
+            role="tab"
+            aria-selected={activeTab === "attendance"}
             onClick={() => setActiveTab("attendance")}
-            className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+            className={`flex items-center justify-center gap-2 rounded-md px-3 py-2 text-xs font-semibold transition-colors sm:py-1.5 ${
               activeTab === "attendance"
                 ? "bg-card text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
@@ -215,12 +199,12 @@ export default function ReportsPage() {
       {/* Filter Toolbar */}
       <Card>
         <CardContent className="p-4 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+          <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
             <div className="flex items-center gap-2 text-sm text-muted-foreground font-medium">
               <Filter className="h-4 w-4" /> Filter Periode:
             </div>
 
-            <div className="w-36">
+            <div className="w-full sm:w-36">
               <Select
                 value={month}
                 onValueChange={(val) => {
@@ -240,7 +224,7 @@ export default function ReportsPage() {
               </Select>
             </div>
 
-            <div className="w-28">
+            <div className="w-full sm:w-28">
               <Select
                 value={year}
                 onValueChange={(val) => {
@@ -251,7 +235,7 @@ export default function ReportsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {[2024, 2025, 2026, 2027].map((y) => (
+                  {getYearOptions().map((y) => (
                     <SelectItem key={y} value={String(y)}>
                       {y}
                     </SelectItem>
@@ -269,7 +253,7 @@ export default function ReportsPage() {
                   : fetchAttendanceReport
               }
               disabled={isLoading}
-              className="gap-2"
+              className="w-full gap-2 sm:w-auto"
             >
               <RefreshCcw className="h-4 w-4" />
               Muat Ulang
@@ -281,7 +265,8 @@ export default function ReportsPage() {
             onClick={
               activeTab === "payroll" ? exportPayrollCSV : exportAttendanceCSV
             }
-            className="gap-2"
+            disabled={isLoading || activeReportEmpty}
+            className="w-full gap-2 sm:w-auto"
           >
             <Download className="h-4 w-4" />
             Export CSV
@@ -294,65 +279,33 @@ export default function ReportsPage() {
         <div className="space-y-6">
           {/* KPI Summary Grid */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Card className="p-4 flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <Wallet className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground font-medium">
-                  Total Pengeluaran Gaji Bersih
-                </p>
-                <p className="text-xl font-bold text-foreground">
-                  {formatCurrency(payrollReport?.totalNetSalary || 0)}
-                </p>
-              </div>
-            </Card>
-
-            <Card className="p-4 flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600">
-                <Users className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground font-medium">
-                  Total Karyawan Diproses
-                </p>
-                <p className="text-xl font-bold text-foreground">
-                  {payrollReport?.totalEmployees || 0} Orang
-                </p>
-              </div>
-            </Card>
-
-            <Card className="p-4 flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600">
-                <FileBarChart className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground font-medium">
-                  Total Tunjangan & Lembur
-                </p>
-                <p className="text-xl font-bold text-foreground">
-                  {formatCurrency(
-                    (payrollReport?.totalAllowance || 0) +
-                      (payrollReport?.totalOvertimePay || 0) +
-                      (payrollReport?.totalBonus || 0)
-                  )}
-                </p>
-              </div>
-            </Card>
-
-            <Card className="p-4 flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-rose-500/10 text-rose-600">
-                <Building2 className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground font-medium">
-                  Total Potongan Karyawan
-                </p>
-                <p className="text-xl font-bold text-foreground">
-                  {formatCurrency(payrollReport?.totalDeduction || 0)}
-                </p>
-              </div>
-            </Card>
+            <StatCard
+              icon={Wallet}
+              label="Total Pengeluaran Gaji Bersih"
+              value={formatCurrency(payrollReport?.totalNetSalary || 0)}
+            />
+            <StatCard
+              icon={Users}
+              label="Total Karyawan Diproses"
+              value={`${payrollReport?.totalEmployees || 0} Orang`}
+              iconClassName="bg-emerald-500/10 text-emerald-600"
+            />
+            <StatCard
+              icon={FileBarChart}
+              label="Total Tunjangan & Lembur"
+              value={formatCurrency(
+                (payrollReport?.totalAllowance || 0) +
+                  (payrollReport?.totalOvertimePay || 0) +
+                  (payrollReport?.totalBonus || 0)
+              )}
+              iconClassName="bg-blue-500/10 text-blue-600"
+            />
+            <StatCard
+              icon={Building2}
+              label="Total Potongan Karyawan"
+              value={formatCurrency(payrollReport?.totalDeduction || 0)}
+              iconClassName="bg-rose-500/10 text-rose-600"
+            />
           </div>
 
           {/* Department Breakdown Table */}
@@ -360,7 +313,12 @@ export default function ReportsPage() {
             <CardHeader>
               <CardTitle>Rekapitulasi Penggajian Per Departemen</CardTitle>
               <CardDescription>
-                Rincian biaya penggajian bersih, tunjangan, dan potongan untuk bulan {MONTH_NAMES[parseInt(month, 10) - 1]} {year}.
+                Rincian biaya penggajian bersih, tunjangan, dan potongan untuk
+                bulan {periodLabel} (gaji Disetujui/Dibayar
+                {payrollReport && payrollReport.draftCount > 0
+                  ? `; ${payrollReport.draftCount} draf belum termasuk`
+                  : ""}
+                ).
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -370,22 +328,22 @@ export default function ReportsPage() {
                 </div>
               ) : !payrollReport || payrollReport.departmentBreakdown.length === 0 ? (
                 <div className="py-8 text-center text-muted-foreground">
-                  Belum ada data penggajian untuk periode ini.
+                  Belum ada data penggajian final untuk periode ini.
                 </div>
               ) : (
-                <div className="relative overflow-x-auto rounded-lg border border-border">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-muted/50 text-xs uppercase font-semibold text-muted-foreground border-b border-border">
-                      <tr>
-                        <th className="px-4 py-3">Departemen</th>
-                        <th className="px-4 py-3">Jumlah Karyawan</th>
-                        <th className="px-4 py-3">Total Tunjangan</th>
-                        <th className="px-4 py-3">Total Potongan</th>
-                        <th className="px-4 py-3">Total Gaji Bersih</th>
-                        <th className="px-4 py-3">Persentase Biaya</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
+                <div className="rounded-lg border border-border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Departemen</TableHead>
+                        <TableHead className="hidden md:table-cell">Jumlah Karyawan</TableHead>
+                        <TableHead className="hidden lg:table-cell">Total Tunjangan</TableHead>
+                        <TableHead className="hidden lg:table-cell">Total Potongan</TableHead>
+                        <TableHead>Total Gaji Bersih</TableHead>
+                        <TableHead>Persentase Biaya</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {payrollReport.departmentBreakdown.map((dept) => {
                         const percent =
                           payrollReport.totalNetSalary > 0
@@ -397,23 +355,23 @@ export default function ReportsPage() {
                             : 0;
 
                         return (
-                          <tr key={dept.departmentId} className="hover:bg-muted/30">
-                            <td className="px-4 py-3 font-semibold text-foreground">
+                          <TableRow key={dept.departmentId}>
+                            <TableCell className="font-semibold text-foreground">
                               {dept.departmentName}
-                            </td>
-                            <td className="px-4 py-3">{dept.employeeCount} orang</td>
-                            <td className="px-4 py-3 text-emerald-600 font-medium dark:text-emerald-400">
+                            </TableCell>
+                            <TableCell className="hidden md:table-cell">{dept.employeeCount} orang</TableCell>
+                            <TableCell className="hidden text-emerald-600 font-medium dark:text-emerald-400 lg:table-cell">
                               {formatCurrency(dept.totalAllowance)}
-                            </td>
-                            <td className="px-4 py-3 text-rose-600 font-medium dark:text-rose-400">
+                            </TableCell>
+                            <TableCell className="hidden text-rose-600 font-medium dark:text-rose-400 lg:table-cell">
                               {formatCurrency(dept.totalDeduction)}
-                            </td>
-                            <td className="px-4 py-3 font-bold text-primary">
+                            </TableCell>
+                            <TableCell className="font-bold text-primary">
                               {formatCurrency(dept.totalNetSalary)}
-                            </td>
-                            <td className="px-4 py-3">
+                            </TableCell>
+                            <TableCell>
                               <div className="flex items-center gap-2">
-                                <div className="h-2 w-24 rounded-full bg-muted overflow-hidden">
+                                <div className="h-2 w-16 rounded-full bg-muted overflow-hidden sm:w-24">
                                   <div
                                     className="h-full bg-primary rounded-full"
                                     style={{ width: `${percent}%` }}
@@ -423,12 +381,12 @@ export default function ReportsPage() {
                                   {percent}%
                                 </span>
                               </div>
-                            </td>
-                          </tr>
+                            </TableCell>
+                          </TableRow>
                         );
                       })}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 </div>
               )}
             </CardContent>
@@ -441,61 +399,30 @@ export default function ReportsPage() {
         <div className="space-y-6">
           {/* Attendance KPI Grid */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Card className="p-4 flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600">
-                <CalendarCheck className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground font-medium">
-                  Total Absensi Hadir
-                </p>
-                <p className="text-xl font-bold text-foreground">
-                  {attendanceReport?.presentCount || 0} Record
-                </p>
-              </div>
-            </Card>
-
-            <Card className="p-4 flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
-                <Clock className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground font-medium">
-                  Keterlambatan Total
-                </p>
-                <p className="text-xl font-bold text-foreground">
-                  {attendanceReport?.totalLateMinutes || 0} Menit
-                </p>
-              </div>
-            </Card>
-
-            <Card className="p-4 flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600">
-                <RefreshCcw className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground font-medium">
-                  Total Jam Lembur
-                </p>
-                <p className="text-xl font-bold text-foreground">
-                  {attendanceReport?.totalOvertimeHours || 0} Jam
-                </p>
-              </div>
-            </Card>
-
-            <Card className="p-4 flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-rose-500/10 text-rose-600">
-                <Users className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground font-medium">
-                  Jumlah Alpa (Absent)
-                </p>
-                <p className="text-xl font-bold text-foreground">
-                  {attendanceReport?.absentCount || 0} Hari
-                </p>
-              </div>
-            </Card>
+            <StatCard
+              icon={CalendarCheck}
+              label="Total Absensi Hadir"
+              value={`${attendanceReport?.presentCount || 0} Record`}
+              iconClassName="bg-emerald-500/10 text-emerald-600"
+            />
+            <StatCard
+              icon={Clock}
+              label="Keterlambatan Total"
+              value={`${attendanceReport?.totalLateMinutes || 0} Menit`}
+              iconClassName="bg-amber-500/10 text-amber-600"
+            />
+            <StatCard
+              icon={RefreshCcw}
+              label="Total Jam Lembur"
+              value={`${attendanceReport?.totalOvertimeHours || 0} Jam`}
+              iconClassName="bg-blue-500/10 text-blue-600"
+            />
+            <StatCard
+              icon={Users}
+              label="Jumlah Alpa (Absent)"
+              value={`${attendanceReport?.absentCount || 0} Hari`}
+              iconClassName="bg-rose-500/10 text-rose-600"
+            />
           </div>
 
           {/* Department Attendance Breakdown */}
@@ -503,7 +430,7 @@ export default function ReportsPage() {
             <CardHeader>
               <CardTitle>Rekapitulasi Kehadiran Per Departemen</CardTitle>
               <CardDescription>
-                Statistik presensi, ketersediaan, keterlambatan, dan lembur untuk bulan {MONTH_NAMES[parseInt(month, 10) - 1]} {year}.
+                Statistik presensi, ketersediaan, keterlambatan, dan lembur untuk bulan {periodLabel}.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -516,41 +443,41 @@ export default function ReportsPage() {
                   Belum ada data kehadiran untuk periode ini.
                 </div>
               ) : (
-                <div className="relative overflow-x-auto rounded-lg border border-border">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-muted/50 text-xs uppercase font-semibold text-muted-foreground border-b border-border">
-                      <tr>
-                        <th className="px-4 py-3">Departemen</th>
-                        <th className="px-4 py-3">Total Record Log</th>
-                        <th className="px-4 py-3">Total Hadir</th>
-                        <th className="px-4 py-3">Terlambat</th>
-                        <th className="px-4 py-3">Alpa</th>
-                        <th className="px-4 py-3">Lembur (Jam)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
+                <div className="rounded-lg border border-border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Departemen</TableHead>
+                        <TableHead className="hidden md:table-cell">Total Record Log</TableHead>
+                        <TableHead>Total Hadir</TableHead>
+                        <TableHead>Terlambat</TableHead>
+                        <TableHead>Alpa</TableHead>
+                        <TableHead className="hidden sm:table-cell">Lembur (Jam)</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {attendanceReport.departmentBreakdown.map((d) => (
-                        <tr key={d.departmentId} className="hover:bg-muted/30">
-                          <td className="px-4 py-3 font-semibold text-foreground">
+                        <TableRow key={d.departmentId}>
+                          <TableCell className="font-semibold text-foreground">
                             {d.departmentName}
-                          </td>
-                          <td className="px-4 py-3">{d.totalRecords} log</td>
-                          <td className="px-4 py-3 font-semibold text-emerald-600 dark:text-emerald-400">
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">{d.totalRecords} log</TableCell>
+                          <TableCell className="font-semibold text-emerald-600 dark:text-emerald-400">
                             {d.presentCount}
-                          </td>
-                          <td className="px-4 py-3 text-amber-600 dark:text-amber-400 font-medium">
+                          </TableCell>
+                          <TableCell className="text-amber-600 dark:text-amber-400 font-medium">
                             {d.lateCount}
-                          </td>
-                          <td className="px-4 py-3 text-rose-600 dark:text-rose-400 font-medium">
+                          </TableCell>
+                          <TableCell className="text-rose-600 dark:text-rose-400 font-medium">
                             {d.absentCount}
-                          </td>
-                          <td className="px-4 py-3 font-bold text-blue-600 dark:text-blue-400">
+                          </TableCell>
+                          <TableCell className="hidden font-bold text-blue-600 dark:text-blue-400 sm:table-cell">
                             {d.totalOvertimeHours} jam
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 </div>
               )}
             </CardContent>

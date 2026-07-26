@@ -1,10 +1,17 @@
 import { NextRequest } from "next/server";
+import { requireAdmin } from "@/src/lib/authz";
 import { prisma } from "@/src/lib/prisma";
+import { attendanceBulkSchema } from "@/src/types";
 import {
   successResponse,
   errorResponse,
+  validationErrorResponse,
+  zodFieldErrors,
 } from "@/src/utils/api-response";
-import { calculateAttendanceMetrics } from "@/src/app/api/attendance/route";
+import {
+  calculateAttendanceMetrics,
+  toUtcDateTime,
+} from "@/src/lib/attendance";
 
 /**
  * POST /api/attendance/bulk — create attendance records for multiple employees at once
@@ -20,87 +27,108 @@ import { calculateAttendanceMetrics } from "@/src/app/api/attendance/route";
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { date, entries } = body;
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
 
-    if (!date || !Array.isArray(entries) || entries.length === 0) {
-      return errorResponse("Data tidak valid: tanggal dan daftar kehadiran wajib diisi", 422);
+    const body = await request.json();
+    const result = attendanceBulkSchema.safeParse(body);
+    if (!result.success) {
+      return validationErrorResponse(zodFieldErrors(result.error));
     }
 
+    const { date, entries } = result.data;
     const targetDate = new Date(date);
-
-    // Find which employees already have attendance for this date
-    const existingRecords = await prisma.attendance.findMany({
-      where: { date: targetDate },
-      select: { employeeId: true },
-    });
-    const existingSet = new Set(existingRecords.map((r) => r.employeeId));
-
-    let created = 0;
-    let skipped = 0;
     const errors: string[] = [];
 
+    // Dedupe entries per employee (entri pertama menang)
+    const dedupedMap = new Map<string, (typeof entries)[number]>();
     for (const entry of entries) {
-      const {
-        employeeId,
-        checkIn,
-        checkOut,
-        status,
-        notes,
-      } = entry;
+      if (dedupedMap.has(entry.employeeId)) {
+        errors.push(`Entri duplikat untuk karyawan ${entry.employeeId} diabaikan`);
+      } else {
+        dedupedMap.set(entry.employeeId, entry);
+      }
+    }
+    const deduped = [...dedupedMap.values()];
+    const employeeIds = deduped.map((e) => e.employeeId);
 
-      // Skip if already has attendance for this date
-      if (existingSet.has(employeeId)) {
-        skipped++;
+    // Validasi eksistensi karyawan dalam 1 query
+    const employees = await prisma.employee.findMany({
+      where: { id: { in: employeeIds } },
+      select: { id: true, fullName: true },
+    });
+    const employeeNames = new Map(employees.map((e) => [e.id, e.fullName]));
+    const unknownIds = employeeIds.filter((id) => !employeeNames.has(id));
+    if (unknownIds.length > 0) {
+      return validationErrorResponse(
+        { entries: [`Karyawan tidak ditemukan: ${unknownIds.join(", ")}`] },
+        "Sebagian karyawan tidak ditemukan"
+      );
+    }
+
+    // Karyawan yang payroll periode ini sudah APPROVED/PAID dikunci
+    const lockedRows = await prisma.payroll.findMany({
+      where: {
+        employeeId: { in: employeeIds },
+        month: targetDate.getUTCMonth() + 1,
+        year: targetDate.getUTCFullYear(),
+        status: { in: ["APPROVED", "PAID"] },
+      },
+      select: { employeeId: true, status: true },
+    });
+    const lockedSet = new Set(lockedRows.map((r) => r.employeeId));
+
+    const data = [];
+    let lockedCount = 0;
+    for (const entry of deduped) {
+      if (lockedSet.has(entry.employeeId)) {
+        lockedCount++;
+        errors.push(
+          `${employeeNames.get(entry.employeeId)}: gaji periode ini sudah final, kehadiran terkunci`
+        );
         continue;
       }
 
-      try {
-        // Calculate metrics from check-in/check-out
-        const metrics = calculateAttendanceMetrics(
-          checkIn || null,
-          checkOut || null
-        );
+      const checkIn = entry.checkIn || null;
+      const checkOut = entry.checkOut || null;
+      const metrics = calculateAttendanceMetrics(checkIn, checkOut);
 
-        // Determine final status
-        let finalStatus = status || "PRESENT";
-        if (
-          metrics.autoStatus &&
-          (finalStatus === "PRESENT" || finalStatus === "LATE")
-        ) {
-          finalStatus = metrics.autoStatus;
-        }
-
-        // Build DateTime objects
-        const checkInDt =
-          checkIn ? new Date(`${date}T${checkIn}:00`) : null;
-        const checkOutDt =
-          checkOut ? new Date(`${date}T${checkOut}:00`) : null;
-
-        await prisma.attendance.create({
-          data: {
-            employeeId,
-            date: targetDate,
-            status: finalStatus,
-            checkIn: checkInDt,
-            checkOut: checkOutDt,
-            lateMinutes: metrics.lateMinutes,
-            overtimeHours: metrics.overtimeHours,
-            workingHours: metrics.workingHours,
-            notes: notes || null,
-          },
-        });
-
-        created++;
-      } catch (err) {
-        errors.push(`Gagal menyimpan untuk karyawan ${employeeId}`);
+      let finalStatus = entry.status || "PRESENT";
+      if (
+        metrics.autoStatus &&
+        (finalStatus === "PRESENT" || finalStatus === "LATE")
+      ) {
+        finalStatus = metrics.autoStatus as typeof finalStatus;
       }
+
+      data.push({
+        employeeId: entry.employeeId,
+        date: targetDate,
+        status: finalStatus,
+        checkIn: toUtcDateTime(date, checkIn),
+        checkOut: toUtcDateTime(date, checkOut),
+        lateMinutes: metrics.lateMinutes,
+        overtimeHours: metrics.overtimeHours,
+        workingHours: metrics.workingHours,
+        notes: entry.notes || null,
+      });
     }
+
+    // Satu createMany atomik; duplikat (sudah ada record tanggal ini) dilewati
+    // oleh constraint @@unique([employeeId, date]).
+    const createResult =
+      data.length > 0
+        ? await prisma.attendance.createMany({ data, skipDuplicates: true })
+        : { count: 0 };
+
+    const created = createResult.count;
+    const skipped = deduped.length - created;
 
     return successResponse(
       {
         created,
         skipped,
+        locked: lockedCount,
         total: entries.length,
         errors: errors.length > 0 ? errors : undefined,
       },

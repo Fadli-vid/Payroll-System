@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { requireAdmin } from "@/src/lib/authz";
 import { prisma } from "@/src/lib/prisma";
 import { payrollStatusSchema } from "@/src/types";
 import {
@@ -12,6 +13,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
     const payroll = await prisma.payroll.findUnique({
       where: { id },
@@ -32,8 +36,29 @@ export async function GET(
       return errorResponse("Data penggajian tidak ditemukan", 404);
     }
 
+    // Deteksi staleness: DRAFT dianggap basi bila ada data kehadiran periode
+    // ini yang berubah setelah payroll terakhir di-generate/diubah.
+    // (Best-effort: penghapusan record kehadiran tidak selalu terdeteksi.)
+    let isStale = false;
+    if (payroll.status === "DRAFT") {
+      const startDate = new Date(Date.UTC(payroll.year, payroll.month - 1, 1));
+      const endDate = new Date(
+        Date.UTC(payroll.year, payroll.month, 0, 23, 59, 59, 999)
+      );
+      const latest = await prisma.attendance.aggregate({
+        where: {
+          employeeId: payroll.employeeId,
+          date: { gte: startDate, lte: endDate },
+        },
+        _max: { updatedAt: true },
+      });
+      isStale =
+        !!latest._max.updatedAt && latest._max.updatedAt > payroll.updatedAt;
+    }
+
     const formatted = {
       ...payroll,
+      isStale,
       basicSalary: Number(payroll.basicSalary),
       allowanceTotal: Number(payroll.allowanceTotal),
       deductionTotal: Number(payroll.deductionTotal),
@@ -66,6 +91,9 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
     const body = await req.json();
 
@@ -88,10 +116,32 @@ export async function PATCH(
       return errorResponse("Data penggajian tidak ditemukan", 404);
     }
 
+    // State machine transisi status: PAID bersifat final; APPROVED dapat
+    // dikembalikan ke DRAFT ("batalkan persetujuan") atau dilanjutkan ke PAID.
+    const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+      DRAFT: ["APPROVED"],
+      APPROVED: ["PAID", "DRAFT"],
+      PAID: [],
+    };
+
+    const nextStatus = validated.data.status;
+    if (
+      existing.status !== nextStatus &&
+      !ALLOWED_TRANSITIONS[existing.status]?.includes(nextStatus)
+    ) {
+      return errorResponse(
+        `Perubahan status ${existing.status} → ${nextStatus} tidak diizinkan`,
+        409
+      );
+    }
+
     const updated = await prisma.payroll.update({
       where: { id },
       data: {
-        status: validated.data.status,
+        status: nextStatus,
+        ...(nextStatus === "APPROVED" ? { approvedAt: new Date() } : {}),
+        ...(nextStatus === "PAID" ? { paidAt: new Date() } : {}),
+        ...(nextStatus === "DRAFT" ? { approvedAt: null, paidAt: null } : {}),
       },
     });
 
@@ -116,6 +166,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
     const existing = await prisma.payroll.findUnique({
       where: { id },

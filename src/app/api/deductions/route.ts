@@ -1,22 +1,23 @@
 import { NextRequest } from "next/server";
+import { requireAdmin } from "@/src/lib/authz";
 import { prisma } from "@/src/lib/prisma";
 import { deductionSchema } from "@/src/types";
 import {
   successResponse,
   errorResponse,
   validationErrorResponse,
+  parseListParams,
 } from "@/src/utils/api-response";
 
 export async function GET(req: NextRequest) {
   try {
-    const searchParams = req.nextUrl.searchParams;
-    const page = parseInt(searchParams.get("page") || "1");
-    const pageSize = parseInt(searchParams.get("pageSize") || "10");
-    const search = searchParams.get("search") || "";
-    const sortBy = searchParams.get("sortBy") || "createdAt";
-    const sortOrder = searchParams.get("sortOrder") === "asc" ? "asc" : "desc";
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
 
-    const skip = (page - 1) * pageSize;
+    const { page, pageSize, search, sortBy, sortOrder, skip } = parseListParams(
+      new URL(req.url),
+      ["name", "type", "amount", "isActive", "createdAt", "updatedAt"]
+    );
 
     const where = search
       ? {
@@ -63,6 +64,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const body = await req.json();
     const validatedData = deductionSchema.safeParse(body);
 
@@ -84,7 +88,10 @@ export async function POST(req: NextRequest) {
     });
 
     if (existing) {
-      return errorResponse("Potongan dengan nama ini sudah ada", 409);
+      return validationErrorResponse(
+        { name: ["Potongan dengan nama ini sudah ada"] },
+        "Potongan sudah ada"
+      );
     }
 
     const newDeduction = await prisma.deduction.create({

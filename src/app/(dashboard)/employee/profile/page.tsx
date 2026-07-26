@@ -12,9 +12,6 @@ import {
   Building2,
   Briefcase,
   BadgeDollarSign,
-  Lock,
-  Eye,
-  EyeOff,
   ShieldCheck,
 } from "lucide-react";
 
@@ -25,7 +22,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/src/components/ui/card";
-import { Button } from "@/src/components/ui/button";
 import { Badge } from "@/src/components/ui/badge";
 import { formatCurrency, formatDate } from "@/src/utils/format";
 import { EMPLOYMENT_STATUS_LABELS } from "@/src/lib/constants";
@@ -35,7 +31,6 @@ interface EmployeeProfile {
   code: string;
   fullName: string;
   email: string;
-  password?: string;
   phone: string | null;
   address: string | null;
   hireDate: string;
@@ -48,7 +43,6 @@ interface EmployeeProfile {
 export default function EmployeeProfilePage() {
   const [profile, setProfile] = useState<EmployeeProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [showPassword, setShowPassword] = useState(false);
 
   const fetchProfile = useCallback(async () => {
     setIsLoading(true);
@@ -101,12 +95,12 @@ export default function EmployeeProfilePage() {
       <Card>
         <CardHeader className="pb-4 border-b">
           <div className="flex items-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary text-2xl font-bold">
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary text-2xl font-bold">
               {profile.fullName.charAt(0).toUpperCase()}
             </div>
-            <div>
-              <CardTitle className="text-xl">{profile.fullName}</CardTitle>
-              <CardDescription className="flex items-center gap-2 mt-1">
+            <div className="min-w-0">
+              <CardTitle className="text-xl break-words">{profile.fullName}</CardTitle>
+              <CardDescription className="flex flex-wrap items-center gap-2 mt-1">
                 <span className="font-mono bg-muted px-2 py-0.5 rounded text-xs">
                   {profile.code}
                 </span>
@@ -120,12 +114,12 @@ export default function EmployeeProfilePage() {
 
         <CardContent className="pt-6 space-y-6">
           {/* Identity Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
             <div className="space-y-1">
               <div className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
                 <Mail className="h-3.5 w-3.5 text-primary" /> Email Resmi
               </div>
-              <div className="text-sm font-medium">{profile.email}</div>
+              <div className="text-sm font-medium break-all">{profile.email}</div>
             </div>
 
             <div className="space-y-1">
@@ -187,28 +181,9 @@ export default function EmployeeProfilePage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 rounded-lg bg-muted/40 p-4">
-            <div className="space-y-1">
-              <span className="text-xs text-muted-foreground">Email Login:</span>
-              <div className="text-sm font-semibold">{profile.email}</div>
-            </div>
-
-            <div className="space-y-1">
-              <span className="text-xs text-muted-foreground">Password Akun:</span>
-              <div className="flex items-center gap-2">
-                <div className="font-mono text-sm font-semibold">
-                  {showPassword ? profile.password : "••••••••"}
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 p-0"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                </Button>
-              </div>
-            </div>
+          <div className="rounded-lg bg-muted/40 p-4 space-y-1">
+            <span className="text-xs text-muted-foreground">Email Login:</span>
+            <div className="text-sm font-semibold break-all">{profile.email}</div>
           </div>
 
           <p className="text-xs text-muted-foreground">

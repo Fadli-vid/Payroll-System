@@ -10,11 +10,20 @@ import {
   PayrollItem,
 } from "@/src/types";
 import { formatCurrency } from "@/src/utils/format";
+import {
+  MONTH_NAMES,
+  PAYROLL_STATUS_LABELS,
+  getYearOptions,
+} from "@/src/lib/constants";
+import { apiErrorMessage } from "@/src/lib/api-client";
+import { useDeleteConfirm } from "@/src/hooks/use-delete-confirm";
 import axios from "axios";
 import { toast } from "sonner";
 
 import { DataTable, Column } from "@/src/components/layout/data-table";
 import { ConfirmDialog } from "@/src/components/layout/confirm-dialog";
+import { StatCard } from "@/src/components/shared/stat-card";
+import { MoneyInput } from "@/src/components/shared/money-input";
 
 import {
   Card,
@@ -24,7 +33,6 @@ import {
   CardTitle,
 } from "@/src/components/ui/card";
 import { Button } from "@/src/components/ui/button";
-import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
 import {
   Select,
@@ -63,25 +71,36 @@ import {
   Wallet,
 } from "lucide-react";
 
-const MONTH_NAMES = [
-  "Januari",
-  "Februari",
-  "Maret",
-  "April",
-  "Mei",
-  "Juni",
-  "Juli",
-  "Agustus",
-  "September",
-  "Oktober",
-  "November",
-  "Desember",
-];
-
 interface DepartmentOption {
   id: string;
   name: string;
 }
+
+interface GenerateResult {
+  totalEmployees: number;
+  processedCount: number;
+  skippedCount: number;
+  errors: string[];
+  message?: string;
+}
+
+type StatusChangeRequest = {
+  row: PayrollItem;
+  next: "DRAFT" | "APPROVED" | "PAID";
+};
+
+const STATUS_CHANGE_COPY: Record<
+  StatusChangeRequest["next"],
+  { title: string; label: string; variant: "default" | "destructive" }
+> = {
+  APPROVED: { title: "Setujui Gaji", label: "Setujui", variant: "default" },
+  PAID: { title: "Tandai Dibayar", label: "Tandai Dibayar", variant: "default" },
+  DRAFT: {
+    title: "Kembalikan ke Draft",
+    label: "Kembalikan ke Draft",
+    variant: "destructive",
+  },
+};
 
 export default function PayrollPage() {
   const router = useRouter();
@@ -118,9 +137,12 @@ export default function PayrollPage() {
 
   // Dialogs
   const [isGenerateOpen, setIsGenerateOpen] = useState(false);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generateResult, setGenerateResult] = useState<GenerateResult | null>(null);
+  const [statusChange, setStatusChange] = useState<StatusChangeRequest | null>(null);
+  const [isChangingStatus, setIsChangingStatus] = useState(false);
+  const [isApproveAllOpen, setIsApproveAllOpen] = useState(false);
+  const [isApprovingAll, setIsApprovingAll] = useState(false);
 
   // ─── Form ──────────────────────────────────────────────
   const form = useForm<PayrollGenerateValues>({
@@ -138,10 +160,11 @@ export default function PayrollPage() {
     async function loadDepts() {
       try {
         const { data: res } = await axios.get("/api/departments?pageSize=100");
-        const deptList = res.data?.data || res.data || [];
+        const deptList = res.data?.data || [];
         setDepartments(Array.isArray(deptList) ? deptList : []);
       } catch (err) {
         console.error("Gagal memuat departemen", err);
+        toast.error("Gagal memuat daftar departemen untuk filter");
       }
     }
     loadDepts();
@@ -194,43 +217,96 @@ export default function PayrollPage() {
     setIsGenerating(true);
     try {
       const { data: res } = await axios.post("/api/payroll/generate", values);
-      toast.success(res.message || "Penggajian berhasil di-generate");
+      const result: GenerateResult | undefined = res.data;
+
       setIsGenerateOpen(false);
+      if (result) {
+        setGenerateResult(result);
+        if (result.skippedCount > 0 || (result.errors?.length ?? 0) > 0) {
+          toast.warning(
+            `${result.processedCount} diproses, ${result.skippedCount} dilewati — periksa rincian hasil.`
+          );
+        } else if (result.processedCount === 0) {
+          toast.warning("Tidak ada karyawan yang diproses untuk periode ini.");
+        } else {
+          toast.success(`${result.processedCount} slip gaji berhasil di-generate.`);
+        }
+      } else {
+        toast.success("Penggajian berhasil di-generate");
+      }
       fetchData();
-    } catch (error: any) {
-      toast.error(
-        error.response?.data?.message || "Gagal memproses pembuatan gaji"
-      );
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Gagal memproses pembuatan gaji"));
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const handleStatusChange = async (
-    id: string,
-    newStatus: "DRAFT" | "APPROVED" | "PAID"
-  ) => {
+  const confirmStatusChange = async () => {
+    if (!statusChange) return;
+    setIsChangingStatus(true);
     try {
-      const { data: res } = await axios.patch(`/api/payroll/${id}`, {
-        status: newStatus,
+      const { data: res } = await axios.patch(`/api/payroll/${statusChange.row.id}`, {
+        status: statusChange.next,
       });
-      toast.success(res.message || `Status diubah menjadi ${newStatus}`);
+      toast.success(
+        res.data?.message ||
+          `Status diubah menjadi ${PAYROLL_STATUS_LABELS[statusChange.next]}`
+      );
+      setStatusChange(null);
       fetchData();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || "Gagal memperbarui status");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Gagal memperbarui status"));
+    } finally {
+      setIsChangingStatus(false);
     }
   };
 
-  const handleDelete = async () => {
-    if (!deletingId) return;
+  const requestApproveAll = () => {
+    if (selectedMonth === "all" || selectedYear === "all") {
+      toast.info(
+        "Pilih bulan dan tahun spesifik pada filter terlebih dahulu untuk menyetujui semua draf."
+      );
+      return;
+    }
+    setIsApproveAllOpen(true);
+  };
+
+  const confirmApproveAll = async () => {
+    setIsApprovingAll(true);
     try {
-      await axios.delete(`/api/payroll/${deletingId}`);
-      toast.success("Data penggajian berhasil dihapus");
+      const payload: Record<string, unknown> = {
+        month: Number(selectedMonth),
+        year: Number(selectedYear),
+      };
+      if (selectedDept !== "all") payload.departmentId = selectedDept;
+
+      const { data: res } = await axios.post("/api/payroll/approve-all", payload);
+      const count: number = res.data?.approvedCount ?? 0;
+      if (count === 0) {
+        toast.info("Tidak ada gaji berstatus Draf pada periode ini.");
+      } else {
+        toast.success(`${count} gaji berhasil disetujui.`);
+      }
+      setIsApproveAllOpen(false);
       fetchData();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || "Gagal menghapus data");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Gagal menyetujui semua gaji"));
+    } finally {
+      setIsApprovingAll(false);
     }
   };
+
+  const deleteConfirm = useDeleteConfirm<PayrollItem>(async (row) => {
+    try {
+      await axios.delete(`/api/payroll/${row.id}`);
+      toast.success("Data penggajian berhasil dihapus");
+      fetchData();
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Gagal menghapus data"));
+      throw error;
+    }
+  });
 
   // ─── Columns ─────────────────────────────────────────────
   const columns: Column<PayrollItem>[] = [
@@ -238,11 +314,11 @@ export default function PayrollPage() {
       key: "employee",
       header: "Karyawan",
       render: (row) => (
-        <div className="flex flex-col">
+        <div className="flex min-w-0 flex-col">
           <span className="font-semibold text-foreground">
             {row.employee.fullName}
           </span>
-          <span className="text-xs text-muted-foreground">
+          <span className="block max-w-[170px] truncate text-xs text-muted-foreground md:max-w-none">
             {row.employee.code} • {row.employee.department.name} ({row.employee.position.name})
           </span>
         </div>
@@ -251,6 +327,7 @@ export default function PayrollPage() {
     {
       key: "period",
       header: "Periode",
+      className: "hidden sm:table-cell",
       render: (row) => (
         <span className="text-sm font-medium">
           {MONTH_NAMES[row.month - 1]} {row.year}
@@ -260,11 +337,13 @@ export default function PayrollPage() {
     {
       key: "basicSalary",
       header: "Gaji Pokok",
+      className: "hidden lg:table-cell",
       render: (row) => formatCurrency(row.basicSalary),
     },
     {
       key: "allowanceTotal",
       header: "Tunjangan",
+      className: "hidden lg:table-cell",
       render: (row) => (
         <span className="text-emerald-600 font-medium dark:text-emerald-400">
           +{formatCurrency(row.allowanceTotal)}
@@ -274,6 +353,7 @@ export default function PayrollPage() {
     {
       key: "deductionTotal",
       header: "Potongan",
+      className: "hidden lg:table-cell",
       render: (row) => (
         <span className="text-rose-600 font-medium dark:text-rose-400">
           -{formatCurrency(row.deductionTotal)}
@@ -283,6 +363,7 @@ export default function PayrollPage() {
     {
       key: "overtimePay",
       header: "Lembur / Bonus",
+      className: "hidden lg:table-cell",
       render: (row) => (
         <div className="text-xs space-y-0.5">
           {row.overtimePay > 0 && (
@@ -324,7 +405,11 @@ export default function PayrollPage() {
           colorClasses = "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300";
         }
 
-        return <Badge className={colorClasses}>{row.status}</Badge>;
+        return (
+          <Badge className={colorClasses}>
+            {PAYROLL_STATUS_LABELS[row.status] || row.status}
+          </Badge>
+        );
       },
     },
     {
@@ -332,7 +417,7 @@ export default function PayrollPage() {
       header: "Aksi",
       render: (row) => (
         <DropdownMenu>
-          <DropdownMenuTrigger className="flex h-8 w-8 items-center justify-center rounded-md border transition-colors hover:bg-muted">
+          <DropdownMenuTrigger className="flex h-8 w-8 items-center justify-center rounded-md border transition-colors hover:bg-muted max-sm:h-10 max-sm:w-10">
             <MoreHorizontal className="h-4 w-4" />
             <span className="sr-only">Buka menu</span>
           </DropdownMenuTrigger>
@@ -346,28 +431,33 @@ export default function PayrollPage() {
 
             {row.status === "DRAFT" && (
               <DropdownMenuItem
-                onClick={() => handleStatusChange(row.id, "APPROVED")}
+                onClick={() => setStatusChange({ row, next: "APPROVED" })}
               >
                 <CheckCircle2 className="mr-2 h-4 w-4 text-blue-600" />
-                Setujui (APPROVED)
+                Setujui (Approved)
               </DropdownMenuItem>
             )}
 
             {row.status === "APPROVED" && (
-              <DropdownMenuItem
-                onClick={() => handleStatusChange(row.id, "PAID")}
-              >
-                <Wallet className="mr-2 h-4 w-4 text-emerald-600" />
-                Tandai Dibayar (PAID)
-              </DropdownMenuItem>
+              <>
+                <DropdownMenuItem
+                  onClick={() => setStatusChange({ row, next: "PAID" })}
+                >
+                  <Wallet className="mr-2 h-4 w-4 text-emerald-600" />
+                  Tandai Dibayar (Paid)
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setStatusChange({ row, next: "DRAFT" })}
+                >
+                  <RefreshCcw className="mr-2 h-4 w-4 text-amber-600" />
+                  Kembalikan ke Draft
+                </DropdownMenuItem>
+              </>
             )}
 
             {row.status === "DRAFT" && (
               <DropdownMenuItem
-                onClick={() => {
-                  setDeletingId(row.id);
-                  setIsDeleteDialogOpen(true);
-                }}
+                onClick={() => deleteConfirm.request(row)}
                 className="text-destructive focus:text-destructive"
               >
                 <Trash2 className="mr-2 h-4 w-4" />
@@ -390,84 +480,59 @@ export default function PayrollPage() {
             Hitung, tinjau, dan kelola proses pembagian gaji karyawan.
           </p>
         </div>
-        <Button
-          onClick={() => setIsGenerateOpen(true)}
-          className="gap-2 self-start sm:self-auto"
-        >
-          <Calculator className="h-4 w-4" />
-          Generate Gaji
-        </Button>
+        <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+          <Button
+            variant="outline"
+            onClick={requestApproveAll}
+            className="gap-2"
+          >
+            <CheckCircle2 className="h-4 w-4" />
+            Setujui Semua Draf
+          </Button>
+          <Button onClick={() => setIsGenerateOpen(true)} className="gap-2">
+            <Calculator className="h-4 w-4" />
+            Generate Gaji
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="p-4 flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Wallet className="h-6 w-6" />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground font-medium">
-              Total Gaji Bersih
-            </p>
-            <p className="text-xl font-bold text-foreground">
-              {formatCurrency(summary.totalNetSalary)}
-            </p>
-          </div>
-        </Card>
-
-        <Card className="p-4 flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600">
-            <DollarSign className="h-6 w-6" />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground font-medium">
-              Total Tunjangan
-            </p>
-            <p className="text-xl font-bold text-foreground">
-              {formatCurrency(summary.totalAllowance)}
-            </p>
-          </div>
-        </Card>
-
-        <Card className="p-4 flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-rose-500/10 text-rose-600">
-            <Receipt className="h-6 w-6" />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground font-medium">
-              Total Potongan
-            </p>
-            <p className="text-xl font-bold text-foreground">
-              {formatCurrency(summary.totalDeduction)}
-            </p>
-          </div>
-        </Card>
-
-        <Card className="p-4 flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
-            <RefreshCcw className="h-6 w-6" />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground font-medium">
-              Total Lembur + Bonus
-            </p>
-            <p className="text-xl font-bold text-foreground">
-              {formatCurrency(summary.totalOvertimePay + summary.totalBonus)}
-            </p>
-          </div>
-        </Card>
+        <StatCard
+          icon={Wallet}
+          label="Total Gaji Bersih"
+          value={formatCurrency(summary.totalNetSalary)}
+        />
+        <StatCard
+          icon={DollarSign}
+          label="Total Tunjangan"
+          value={formatCurrency(summary.totalAllowance)}
+          iconClassName="bg-emerald-500/10 text-emerald-600"
+        />
+        <StatCard
+          icon={Receipt}
+          label="Total Potongan"
+          value={formatCurrency(summary.totalDeduction)}
+          iconClassName="bg-rose-500/10 text-rose-600"
+        />
+        <StatCard
+          icon={RefreshCcw}
+          label="Total Lembur + Bonus"
+          value={formatCurrency(summary.totalOvertimePay + summary.totalBonus)}
+          iconClassName="bg-amber-500/10 text-amber-600"
+        />
       </div>
 
       {/* Filter Bar */}
       <Card>
         <CardContent className="p-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground font-medium mr-2">
+          <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-center">
+            <div className="col-span-2 flex items-center gap-2 text-sm text-muted-foreground font-medium sm:col-span-1 sm:mr-2">
               <Filter className="h-4 w-4" /> Filter:
             </div>
 
             {/* Month Filter */}
-            <div className="w-36">
+            <div className="w-full sm:w-36">
               <Select
                 value={selectedMonth}
                 onValueChange={(val) => {
@@ -490,7 +555,7 @@ export default function PayrollPage() {
             </div>
 
             {/* Year Filter */}
-            <div className="w-28">
+            <div className="w-full sm:w-28">
               <Select
                 value={selectedYear}
                 onValueChange={(val) => {
@@ -503,7 +568,7 @@ export default function PayrollPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Semua Tahun</SelectItem>
-                  {[2024, 2025, 2026, 2027].map((y) => (
+                  {getYearOptions().map((y) => (
                     <SelectItem key={y} value={String(y)}>
                       {y}
                     </SelectItem>
@@ -513,7 +578,7 @@ export default function PayrollPage() {
             </div>
 
             {/* Status Filter */}
-            <div className="w-36">
+            <div className="w-full sm:w-36">
               <Select
                 value={selectedStatus}
                 onValueChange={(val) => {
@@ -534,7 +599,7 @@ export default function PayrollPage() {
             </div>
 
             {/* Department Filter */}
-            <div className="w-44">
+            <div className="col-span-2 w-full sm:col-span-1 sm:w-44">
               <Select
                 value={selectedDept}
                 onValueChange={(val) => {
@@ -563,7 +628,7 @@ export default function PayrollPage() {
               size="sm"
               onClick={fetchData}
               disabled={isLoading}
-              className="ml-auto gap-2"
+              className="col-span-2 gap-2 sm:col-span-1 sm:ml-auto"
             >
               <RefreshCcw className="h-4 w-4" />
               Refresh
@@ -612,7 +677,7 @@ export default function PayrollPage() {
             onSubmit={form.handleSubmit(handleGenerateSubmit as any)}
             className="space-y-4 pt-2"
           >
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="month">Bulan Target</Label>
                 <Select
@@ -646,7 +711,7 @@ export default function PayrollPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {[2024, 2025, 2026, 2027].map((y) => (
+                    {getYearOptions().map((y) => (
                       <SelectItem key={y} value={String(y)}>
                         {y}
                       </SelectItem>
@@ -655,6 +720,13 @@ export default function PayrollPage() {
                 </Select>
               </div>
             </div>
+
+            {(form.formState.errors.month || form.formState.errors.year) && (
+              <p className="text-xs text-destructive">
+                {form.formState.errors.month?.message ||
+                  form.formState.errors.year?.message}
+              </p>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="departmentId">Departemen (Opsional)</Label>
@@ -682,12 +754,16 @@ export default function PayrollPage() {
 
             <div className="space-y-2">
               <Label htmlFor="bonus">Bonus Tambahan / Insentif (Rp)</Label>
-              <Input
+              <MoneyInput
                 id="bonus"
-                type="number"
                 placeholder="0"
                 {...form.register("bonus")}
               />
+              {form.formState.errors.bonus && (
+                <p className="text-xs text-destructive">
+                  {form.formState.errors.bonus.message}
+                </p>
+              )}
               <p className="text-[11px] text-muted-foreground">
                 Bonus ini akan ditambahkan secara rata ke seluruh karyawan yang diproses.
               </p>
@@ -709,13 +785,118 @@ export default function PayrollPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Generate Result Dialog */}
+      <Dialog
+        open={generateResult !== null}
+        onOpenChange={(open) => {
+          if (!open) setGenerateResult(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Hasil Generate Penggajian</DialogTitle>
+            <DialogDescription>
+              Ringkasan proses generate gaji massal.
+            </DialogDescription>
+          </DialogHeader>
+          {generateResult && (
+            <div className="space-y-3 pt-2">
+              <div className="grid grid-cols-3 gap-2 text-center sm:gap-3">
+                <div className="rounded-lg border p-2 sm:p-3">
+                  <p className="text-xl font-bold sm:text-2xl">{generateResult.totalEmployees}</p>
+                  <p className="text-xs text-muted-foreground">Total Karyawan</p>
+                </div>
+                <div className="rounded-lg border p-2 sm:p-3">
+                  <p className="text-xl font-bold text-emerald-600 sm:text-2xl">
+                    {generateResult.processedCount}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Diproses</p>
+                </div>
+                <div className="rounded-lg border p-2 sm:p-3">
+                  <p className="text-xl font-bold text-amber-600 sm:text-2xl">
+                    {generateResult.skippedCount}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Dilewati</p>
+                </div>
+              </div>
+
+              {generateResult.errors && generateResult.errors.length > 0 && (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                  <p className="mb-2 text-sm font-semibold text-destructive">
+                    Rincian karyawan yang dilewati:
+                  </p>
+                  <ul className="max-h-40 space-y-1 overflow-y-auto text-xs text-muted-foreground">
+                    {generateResult.errors.map((err, i) => (
+                      <li key={i}>• {err}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setGenerateResult(null)}>Tutup</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Approve All Confirm Dialog */}
+      <ConfirmDialog
+        open={isApproveAllOpen}
+        onOpenChange={setIsApproveAllOpen}
+        onConfirm={confirmApproveAll}
+        isLoading={isApprovingAll}
+        title="Setujui Semua Draf"
+        description={
+          selectedMonth !== "all" && selectedYear !== "all"
+            ? `Semua gaji berstatus Draf periode ${MONTH_NAMES[Number(selectedMonth) - 1]} ${selectedYear}${
+                selectedDept !== "all"
+                  ? ` di departemen ${departments.find((d) => d.id === selectedDept)?.name || "terpilih"}`
+                  : ""
+              } akan diubah menjadi Disetujui. Slip yang sudah Disetujui/Dibayar tidak terpengaruh.`
+            : ""
+        }
+        confirmLabel="Setujui Semua"
+        cancelLabel="Batal"
+      />
+
+      {/* Status Change Confirm Dialog */}
+      <ConfirmDialog
+        open={statusChange !== null}
+        onOpenChange={(open) => {
+          if (!open) setStatusChange(null);
+        }}
+        onConfirm={confirmStatusChange}
+        title={statusChange ? STATUS_CHANGE_COPY[statusChange.next].title : ""}
+        description={
+          statusChange
+            ? `${statusChange.row.employee.fullName} — ${MONTH_NAMES[statusChange.row.month - 1]} ${statusChange.row.year} — Gaji bersih ${formatCurrency(statusChange.row.netSalary)}.${
+                statusChange.next === "PAID"
+                  ? " Setelah ditandai DIBAYAR, status tidak dapat diubah lagi."
+                  : ""
+              }`
+            : ""
+        }
+        confirmLabel={
+          statusChange ? STATUS_CHANGE_COPY[statusChange.next].label : "Lanjutkan"
+        }
+        cancelLabel="Batal"
+        variant={statusChange ? STATUS_CHANGE_COPY[statusChange.next].variant : "default"}
+        isLoading={isChangingStatus}
+      />
+
       {/* Delete Confirm Dialog */}
       <ConfirmDialog
-        open={isDeleteDialogOpen}
-        onOpenChange={setIsDeleteDialogOpen}
-        onConfirm={handleDelete}
+        open={deleteConfirm.open}
+        onOpenChange={deleteConfirm.setOpen}
+        onConfirm={deleteConfirm.confirm}
+        isLoading={deleteConfirm.isDeleting}
         title="Hapus Draft Gaji"
-        description="Apakah Anda yakin ingin menghapus data penggajian DRAFT ini? Anda dapat meng-generate ulang gaji ini kapan saja."
+        description={
+          deleteConfirm.item
+            ? `Hapus draft gaji ${deleteConfirm.item.employee.fullName} periode ${MONTH_NAMES[deleteConfirm.item.month - 1]} ${deleteConfirm.item.year}? Anda dapat meng-generate ulang gaji ini kapan saja.`
+            : "Apakah Anda yakin ingin menghapus data penggajian DRAFT ini?"
+        }
         confirmLabel="Hapus Draft"
         cancelLabel="Batal"
       />

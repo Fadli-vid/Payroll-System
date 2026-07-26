@@ -223,7 +223,7 @@ export default function PositionsPage() {
           <div>
             <div className="font-medium">{row.name}</div>
             {row.description && (
-              <div className="text-xs text-muted-foreground line-clamp-1 max-w-xs">
+              <div className="text-xs text-muted-foreground line-clamp-1 max-w-[180px] sm:max-w-xs">
                 {row.description}
               </div>
             )}
@@ -235,7 +235,7 @@ export default function PositionsPage() {
       key: "baseAllowance",
       header: "Tunjangan Jabatan",
       sortable: true,
-      className: "w-[180px]",
+      className: "w-[180px] hidden sm:table-cell",
       render: (row) => (
         <span className="font-medium text-emerald-600 dark:text-emerald-400">
           {formatCurrency(row.baseAllowance)}
@@ -246,7 +246,7 @@ export default function PositionsPage() {
       key: "employeeCount",
       header: "Karyawan",
       sortable: false,
-      className: "w-[120px]",
+      className: "w-[120px] hidden md:table-cell",
       render: (row) => (
         <div className="flex items-center gap-1.5">
           <Users className="h-3.5 w-3.5 text-muted-foreground" />
@@ -260,7 +260,7 @@ export default function PositionsPage() {
       key: "createdAt",
       header: "Dibuat",
       sortable: true,
-      className: "w-[160px]",
+      className: "w-[160px] hidden lg:table-cell",
       render: (row) => (
         <span className="text-sm text-muted-foreground">
           {formatDate(row.createdAt)}
@@ -274,7 +274,7 @@ export default function PositionsPage() {
       render: (row) => (
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium hover:bg-accent hover:text-accent-foreground focus-visible:outline-none"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium hover:bg-accent hover:text-accent-foreground focus-visible:outline-none max-sm:h-10 max-sm:w-10"
           >
             <span className="sr-only">Menu</span>
             <svg
@@ -426,7 +426,7 @@ export default function PositionsPage() {
               )}
             </div>
 
-            <DialogFooter className="gap-2 sm:gap-0 pt-2">
+            <DialogFooter className="pt-2">
               <Button
                 type="button"
                 variant="outline"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Table,
   TableBody,
@@ -21,6 +21,7 @@ import {
   ArrowUp,
   ArrowDown,
   Inbox,
+  X,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────
@@ -83,11 +84,29 @@ export function DataTable<T extends object>({
   actions,
 }: DataTableProps<T>) {
   const [localSearch, setLocalSearch] = useState(search);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const totalPages = Math.ceil(total / pageSize);
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
+  // Debounce 300ms saat mengetik; submit (Enter) / clear langsung
+  const emitSearch = (value: string, immediate = false) => {
+    setLocalSearch(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (immediate) {
+      onSearchChange?.(value);
+    } else {
+      debounceRef.current = setTimeout(() => onSearchChange?.(value), 300);
+    }
+  };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSearchChange?.(localSearch);
+    emitSearch(localSearch, true);
   };
 
   const handleSort = (key: string) => {
@@ -117,26 +136,46 @@ export function DataTable<T extends object>({
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={localSearch}
-              onChange={(e) => setLocalSearch(e.target.value)}
+              onChange={(e) => emitSearch(e.target.value)}
               placeholder={searchPlaceholder}
-              className="pl-9 h-9"
+              className="pl-9 pr-8 h-9"
             />
+            {localSearch && (
+              <button
+                type="button"
+                onClick={() => emitSearch("", true)}
+                aria-label="Hapus pencarian"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground max-sm:p-2 max-sm:right-1"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
           </form>
         )}
-        {actions && <div className="flex items-center gap-2">{actions}</div>}
+        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border bg-card overflow-x-auto">
+      <div className="rounded-lg border bg-card overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
               {columns.map((col) => (
-                <TableHead key={col.key} className={col.className}>
+                <TableHead
+                  key={col.key}
+                  className={col.className}
+                  aria-sort={
+                    col.sortable && sortBy === col.key
+                      ? sortOrder === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : undefined
+                  }
+                >
                   {col.sortable ? (
                     <button
                       type="button"
-                      className="flex items-center gap-1.5 hover:text-foreground transition-colors"
+                      className="flex min-h-8 items-center gap-1.5 hover:text-foreground transition-colors max-sm:min-h-10"
                       onClick={() => handleSort(col.key)}
                     >
                       {col.header}
@@ -162,7 +201,11 @@ export function DataTable<T extends object>({
                 >
                   <div className="flex flex-col items-center gap-2 text-muted-foreground">
                     <Inbox className="h-10 w-10 opacity-40" />
-                    <span className="text-sm">Tidak ada data ditemukan.</span>
+                    <span className="text-sm">
+                      {search || localSearch
+                        ? "Tidak ada hasil untuk pencarian ini — coba ubah kata kunci atau hapus filter."
+                        : "Belum ada data."}
+                    </span>
                   </div>
                 </TableCell>
               </TableRow>
@@ -186,29 +229,33 @@ export function DataTable<T extends object>({
         </Table>
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-muted-foreground">
-            Menampilkan {(page - 1) * pageSize + 1}–
-            {Math.min(page * pageSize, total)} dari {total} data
-          </p>
+      {/* Footer: ringkasan selalu tampil; tombol halaman hanya bila perlu */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-muted-foreground">
+          {total === 0
+            ? "0 data"
+            : `Menampilkan ${(page - 1) * pageSize + 1}–${Math.min(
+                page * pageSize,
+                total
+              )} dari ${total} data`}
+        </p>
+        {totalPages > 1 && (
           <div className="flex items-center gap-1">
             <Button
               variant="outline"
               size="icon"
-              className="h-8 w-8"
               disabled={page <= 1}
               onClick={() => onPageChange(1)}
+              aria-label="Halaman pertama"
             >
               <ChevronsLeft className="h-4 w-4" />
             </Button>
             <Button
               variant="outline"
               size="icon"
-              className="h-8 w-8"
               disabled={page <= 1}
               onClick={() => onPageChange(page - 1)}
+              aria-label="Halaman sebelumnya"
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
@@ -218,24 +265,24 @@ export function DataTable<T extends object>({
             <Button
               variant="outline"
               size="icon"
-              className="h-8 w-8"
               disabled={page >= totalPages}
               onClick={() => onPageChange(page + 1)}
+              aria-label="Halaman berikutnya"
             >
               <ChevronRight className="h-4 w-4" />
             </Button>
             <Button
               variant="outline"
               size="icon"
-              className="h-8 w-8"
               disabled={page >= totalPages}
               onClick={() => onPageChange(totalPages)}
+              aria-label="Halaman terakhir"
             >
               <ChevronsRight className="h-4 w-4" />
             </Button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

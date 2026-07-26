@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { requireAdmin } from "@/src/lib/authz";
 import { prisma } from "@/src/lib/prisma";
 import { penaltySettingSchema } from "@/src/types";
 import {
@@ -12,10 +13,34 @@ interface RouteParams {
 }
 
 /**
+ * GET /api/penalty-settings/[id] — get a single penalty setting
+ */
+export async function GET(_request: NextRequest, { params }: RouteParams) {
+  try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
+    const { id } = await params;
+    const setting = await prisma.penaltySetting.findUnique({ where: { id } });
+    if (!setting) {
+      return errorResponse("Pengaturan penalti tidak ditemukan", 404);
+    }
+
+    return successResponse({ ...setting, value: Number(setting.value) });
+  } catch (error) {
+    console.error("GET /api/penalty-settings/[id] error:", error);
+    return errorResponse("Gagal memuat pengaturan penalti");
+  }
+}
+
+/**
  * PUT /api/penalty-settings/[id] — update a penalty setting
  */
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
     const body = await request.json();
     const result = penaltySettingSchema.safeParse(body);
@@ -38,10 +63,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const { type, mode, value, minMinutes, maxMinutes, description, isActive } =
       result.data;
 
-    // For LATE type, check overlapping minute ranges (excluding self)
-    if (type === "LATE") {
+    // For LATE type, check overlapping minute ranges (excluding self; hanya antar aturan aktif)
+    if (type === "LATE" && isActive) {
       const otherLate = await prisma.penaltySetting.findMany({
-        where: { type: "LATE", id: { not: id } },
+        where: { type: "LATE", id: { not: id }, isActive: true },
       });
 
       for (const other of otherLate) {
@@ -84,6 +109,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
  */
 export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
 
     const existing = await prisma.penaltySetting.findUnique({ where: { id } });

@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { requireAdmin } from "@/src/lib/authz";
 import { prisma } from "@/src/lib/prisma";
 import { allowanceSchema } from "@/src/types";
 import {
@@ -12,6 +13,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
     const allowance = await prisma.allowance.findUnique({
       where: { id },
@@ -36,6 +40,9 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
     const body = await req.json();
     const validatedData = allowanceSchema.safeParse(body);
@@ -70,7 +77,10 @@ export async function PUT(
     });
 
     if (duplicate) {
-      return errorResponse("Tunjangan dengan nama ini sudah ada", 409);
+      return validationErrorResponse(
+        { name: ["Tunjangan dengan nama ini sudah ada"] },
+        "Tunjangan sudah ada"
+      );
     }
 
     const updated = await prisma.allowance.update({
@@ -99,6 +109,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
 
     // Check if exists

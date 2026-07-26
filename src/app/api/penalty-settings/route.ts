@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { requireAdmin } from "@/src/lib/authz";
 import { prisma } from "@/src/lib/prisma";
 import { penaltySettingSchema } from "@/src/types";
 import {
@@ -12,6 +13,9 @@ import {
  */
 export async function GET(request: NextRequest) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const url = new URL(request.url);
     const type = url.searchParams.get("type") || ""; // LATE or ABSENT
 
@@ -40,6 +44,9 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const body = await request.json();
     const result = penaltySettingSchema.safeParse(body);
 
@@ -56,10 +63,11 @@ export async function POST(request: NextRequest) {
     const { type, mode, value, minMinutes, maxMinutes, description, isActive } =
       result.data;
 
-    // For LATE type, check overlapping minute ranges
-    if (type === "LATE") {
+    // For LATE type, check overlapping minute ranges (hanya antar aturan aktif —
+    // aturan nonaktif tidak boleh memblokir tier baru)
+    if (type === "LATE" && isActive) {
       const existingLate = await prisma.penaltySetting.findMany({
-        where: { type: "LATE" },
+        where: { type: "LATE", isActive: true },
       });
 
       for (const existing of existingLate) {

@@ -3,14 +3,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import {
   allowanceSchema,
   AllowanceFormValues,
   ListQueryParams,
-  PaginatedResponse,
 } from "@/src/types";
 import { formatCurrency, formatDate } from "@/src/utils/format";
+import { apiList, apiErrorMessage } from "@/src/lib/api-client";
+import { useDeleteConfirm } from "@/src/hooks/use-delete-confirm";
 import axios from "axios";
 import { toast } from "sonner";
 
@@ -78,9 +78,7 @@ export default function AllowancesPage() {
 
   // Dialogs
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // ─── Form ──────────────────────────────────────────────
   const form = useForm<AllowanceFormValues>({
@@ -107,13 +105,11 @@ export default function AllowancesPage() {
         sortBy,
         sortOrder,
       };
-      const { data: response } = await axios.get("/api/allowances", { params });
-
-      const result = response.data;
-      setData(Array.isArray(result?.data) ? result.data : Array.isArray(result) ? result : []);
-      setTotal(result?.meta?.total || 0);
+      const result = await apiList<Allowance>("/api/allowances", { ...params });
+      setData(result.data);
+      setTotal(result.meta.total);
     } catch (error) {
-      toast.error("Gagal mengambil data tunjangan");
+      toast.error(apiErrorMessage(error, "Gagal mengambil data tunjangan"));
       console.error(error);
     } finally {
       setIsLoading(false);
@@ -143,11 +139,6 @@ export default function AllowancesPage() {
     setIsDialogOpen(true);
   };
 
-  const openDeleteDialog = (id: string) => {
-    setDeletingId(id);
-    setIsDeleteDialogOpen(true);
-  };
-
   const handleSubmit = async (values: AllowanceFormValues) => {
     try {
       if (editingId) {
@@ -159,25 +150,23 @@ export default function AllowancesPage() {
       }
       setIsDialogOpen(false);
       fetchData();
-    } catch (error: any) {
+    } catch (error) {
       toast.error(
-        error.response?.data?.message || "Terjadi kesalahan saat menyimpan data"
+        apiErrorMessage(error, "Terjadi kesalahan saat menyimpan data")
       );
     }
   };
 
-  const handleDelete = async () => {
-    if (!deletingId) return;
+  const deleteConfirm = useDeleteConfirm<Allowance>(async (row) => {
     try {
-      await axios.delete(`/api/allowances/${deletingId}`);
+      await axios.delete(`/api/allowances/${row.id}`);
       toast.success("Tunjangan berhasil dihapus");
       fetchData();
-    } catch (error: any) {
-      toast.error(
-        error.response?.data?.message || "Gagal menghapus tunjangan"
-      );
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Gagal menghapus tunjangan"));
+      throw error;
     }
-  };
+  });
 
   // ─── Columns ─────────────────────────────────────────────
   const columns: Column<Allowance>[] = [
@@ -189,6 +178,7 @@ export default function AllowancesPage() {
     {
       key: "type",
       header: "Tipe",
+      className: "hidden sm:table-cell",
       render: (row) => (
         <Badge variant="outline" className="text-xs">
           {row.type === "PERCENTAGE" ? "Persentase" : "Nominal Tetap"}
@@ -218,6 +208,7 @@ export default function AllowancesPage() {
       key: "createdAt",
       header: "Dibuat Pada",
       sortable: true,
+      className: "hidden md:table-cell",
       render: (row) => formatDate(row.createdAt),
     },
     {
@@ -226,7 +217,7 @@ export default function AllowancesPage() {
       render: (row) => (
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="flex h-8 w-8 items-center justify-center rounded-md border transition-colors hover:bg-muted"
+            className="flex h-8 w-8 items-center justify-center rounded-md border transition-colors hover:bg-muted max-sm:h-10 max-sm:w-10"
           >
             <MoreHorizontal className="h-4 w-4" />
             <span className="sr-only">Buka menu</span>
@@ -239,7 +230,7 @@ export default function AllowancesPage() {
               Edit
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={() => openDeleteDialog(row.id)}
+              onClick={() => deleteConfirm.request(row)}
               className="text-destructive focus:text-destructive"
             >
               <Trash2 className="mr-2 h-4 w-4" />
@@ -425,11 +416,12 @@ export default function AllowancesPage() {
 
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog
-        open={isDeleteDialogOpen}
-        onOpenChange={setIsDeleteDialogOpen}
-        onConfirm={handleDelete}
+        open={deleteConfirm.open}
+        onOpenChange={deleteConfirm.setOpen}
+        onConfirm={deleteConfirm.confirm}
+        isLoading={deleteConfirm.isDeleting}
         title="Hapus Tunjangan"
-        description="Apakah Anda yakin ingin menghapus tunjangan ini? Data yang dihapus tidak dapat dikembalikan."
+        description={`Apakah Anda yakin ingin menghapus tunjangan "${deleteConfirm.item?.name ?? ""}"? Data yang dihapus tidak dapat dikembalikan.`}
         confirmLabel="Hapus"
         cancelLabel="Batal"
       />

@@ -6,8 +6,8 @@ import {
   Users,
   Building2,
   Calculator,
-  TrendingUp,
   Clock,
+  AlertTriangle,
   ArrowDownRight,
   RefreshCw,
   Briefcase,
@@ -30,6 +30,11 @@ import {
   TableRow,
 } from "@/src/components/ui/table";
 import { formatCurrency, formatDate } from "@/src/utils/format";
+import {
+  getEmployeeStatusVariant,
+  getPayrollStatusVariant,
+} from "@/src/utils/status";
+import { apiErrorMessage } from "@/src/lib/api-client";
 import {
   EMPLOYMENT_STATUS_LABELS,
   PAYROLL_STATUS_LABELS,
@@ -134,36 +139,6 @@ const statCards = [
   },
 ] as const;
 
-// ─── Status Badge Variant Map ────────────────────────────
-
-function getEmployeeStatusVariant(status: string) {
-  switch (status) {
-    case "ACTIVE":
-      return "default";
-    case "INACTIVE":
-      return "secondary";
-    case "RESIGNED":
-      return "outline";
-    case "TERMINATED":
-      return "destructive";
-    default:
-      return "secondary";
-  }
-}
-
-function getPayrollStatusVariant(status: string) {
-  switch (status) {
-    case "DRAFT":
-      return "secondary";
-    case "APPROVED":
-      return "default";
-    case "PAID":
-      return "outline";
-    default:
-      return "secondary";
-  }
-}
-
 // ─── Bar Chart Component ─────────────────────────────────
 
 function BarChart({
@@ -180,11 +155,14 @@ function BarChart({
         return (
           <div
             key={i}
-            className="flex-1 flex flex-col items-center gap-2 group"
+            className="relative min-w-0 flex-1 flex flex-col items-center gap-2 group"
           >
-            {/* Value tooltip */}
-            <div className="text-[10px] font-medium text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-              {formatCurrency(item.total)}
+            {/* Value tooltip — absolute agar teks nominal tidak memaksa
+                lebar minimum kolom (overflow terpotong Card di mobile) */}
+            <div className="relative h-4 w-full">
+              <div className="absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap text-[10px] font-medium text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 pointer-events-none">
+                {formatCurrency(item.total)}
+              </div>
             </div>
             {/* Bar */}
             <div className="w-full flex flex-col justify-end h-full">
@@ -194,8 +172,9 @@ function BarChart({
               />
             </div>
             {/* Label */}
-            <span className="text-[10px] text-muted-foreground font-medium">
-              {item.label}
+            <span className="max-w-full truncate text-[10px] text-muted-foreground font-medium">
+              <span className="sm:hidden">{item.label.split(" ")[0]}</span>
+              <span className="hidden sm:inline">{item.label}</span>
             </span>
           </div>
         );
@@ -245,16 +224,21 @@ function TableSkeleton({ rows = 5, cols = 4 }: { rows?: number; cols?: number })
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchDashboard = useCallback(async () => {
     try {
       setIsLoading(true);
+      setError(null);
       const res = await axios.get("/api/dashboard");
       if (res.data.success) {
         setData(res.data.data);
+      } else {
+        setError(res.data.message || "Gagal memuat data dashboard");
       }
-    } catch (error) {
-      console.error("Failed to fetch dashboard:", error);
+    } catch (err) {
+      console.error("Failed to fetch dashboard:", err);
+      setError(apiErrorMessage(err, "Gagal memuat data dashboard"));
     } finally {
       setIsLoading(false);
     }
@@ -270,7 +254,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Page heading */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Dashboard</h2>
           <p className="text-muted-foreground">
@@ -282,7 +266,7 @@ export default function DashboardPage() {
           size="sm"
           onClick={fetchDashboard}
           disabled={isLoading}
-          className="gap-2"
+          className="gap-2 self-start sm:self-auto"
         >
           <RefreshCw
             className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
@@ -291,8 +275,27 @@ export default function DashboardPage() {
         </Button>
       </div>
 
+      {/* Error state — jangan tampilkan angka nol palsu saat gagal memuat */}
+      {error && !isLoading && (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
+            <AlertTriangle className="h-8 w-8 text-destructive" />
+            <div>
+              <p className="font-semibold text-destructive">{error}</p>
+              <p className="text-sm text-muted-foreground">
+                Data dashboard tidak dapat dimuat. Periksa koneksi lalu coba lagi.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={fetchDashboard} className="gap-2">
+              <RefreshCw className="h-4 w-4" />
+              Coba Lagi
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Stats Grid */}
-      {isLoading && !data ? (
+      {error && !data ? null : isLoading && !data ? (
         <StatsSkeleton />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -450,7 +453,7 @@ export default function DashboardPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Nama</TableHead>
-                    <TableHead>Departemen</TableHead>
+                    <TableHead className="hidden sm:table-cell">Departemen</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Tgl Masuk</TableHead>
                   </TableRow>
@@ -464,13 +467,13 @@ export default function DashboardPage() {
                       <TableRow key={emp.id}>
                         <TableCell>
                           <div>
-                            <div className="font-medium">{emp.fullName}</div>
+                            <div className="font-medium truncate max-w-[160px] sm:max-w-none">{emp.fullName}</div>
                             <div className="text-xs text-muted-foreground">
                               {emp.code}
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell className="text-sm">
+                        <TableCell className="hidden text-sm sm:table-cell">
                           {emp.department}
                         </TableCell>
                         <TableCell>
@@ -513,7 +516,7 @@ export default function DashboardPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Karyawan</TableHead>
-                    <TableHead>Periode</TableHead>
+                    <TableHead className="hidden sm:table-cell">Periode</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Gaji Bersih</TableHead>
                   </TableRow>
@@ -527,7 +530,7 @@ export default function DashboardPage() {
                       <TableRow key={pay.id}>
                         <TableCell>
                           <div>
-                            <div className="font-medium">
+                            <div className="font-medium truncate max-w-[160px] sm:max-w-none">
                               {pay.employeeName}
                             </div>
                             <div className="text-xs text-muted-foreground">
@@ -535,7 +538,7 @@ export default function DashboardPage() {
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell className="text-sm">
+                        <TableCell className="hidden text-sm sm:table-cell">
                           {MONTH_NAMES[pay.month - 1]} {pay.year}
                         </TableCell>
                         <TableCell>

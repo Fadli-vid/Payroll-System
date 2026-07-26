@@ -1,8 +1,15 @@
-import { NextResponse } from "next/server";
+import { requireAdmin } from "@/src/lib/authz";
 import { prisma } from "@/src/lib/prisma";
+import { successResponse, errorResponse } from "@/src/utils/api-response";
+
+// Angka uang dashboard hanya menghitung payroll final (bukan DRAFT).
+const FINAL_STATUSES = ["APPROVED", "PAID"] as const;
 
 export async function GET() {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const now = new Date();
     const currentMonth = now.getMonth() + 1;
     const currentYear = now.getFullYear();
@@ -24,7 +31,11 @@ export async function GET() {
       prisma.position.count().catch(() => 0),
       prisma.payroll
         .aggregate({
-          where: { month: currentMonth, year: currentYear },
+          where: {
+            month: currentMonth,
+            year: currentYear,
+            status: { in: [...FINAL_STATUSES] },
+          },
           _sum: {
             netSalary: true,
             overtimePay: true,
@@ -82,9 +93,7 @@ export async function GET() {
       statusCounts[item.status] = item._count;
     }
 
-    return NextResponse.json({
-      success: true,
-      data: {
+    return successResponse({
         stats: {
           totalEmployees,
           activeEmployees,
@@ -118,14 +127,10 @@ export async function GET() {
           status: p.status,
         })),
         monthlyChart: monthlyPayrollData,
-      },
     });
   } catch (error) {
     console.error("Dashboard API error:", error);
-    return NextResponse.json(
-      { success: false, message: "Gagal memuat data dashboard" },
-      { status: 500 }
-    );
+    return errorResponse("Gagal memuat data dashboard", 500);
   }
 }
 
@@ -162,6 +167,7 @@ async function getMonthlyPayrollData(currentMonth: number, currentYear: number) 
   try {
     const grouped = await prisma.payroll.groupBy({
       by: ["month", "year"],
+      where: { status: { in: [...FINAL_STATUSES] } },
       _sum: { netSalary: true },
     });
 

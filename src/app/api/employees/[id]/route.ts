@@ -1,10 +1,13 @@
 import { NextRequest } from "next/server";
+import bcrypt from "bcryptjs";
+import { requireAdmin } from "@/src/lib/authz";
 import { prisma } from "@/src/lib/prisma";
 import { employeeSchema } from "@/src/types";
 import {
   successResponse,
   errorResponse,
   validationErrorResponse,
+  zodFieldErrors,
 } from "@/src/utils/api-response";
 
 interface RouteParams {
@@ -16,6 +19,9 @@ interface RouteParams {
  */
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
     const employee = await prisma.employee.findUnique({
       where: { id },
@@ -54,18 +60,15 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
  */
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
     const body = await request.json();
     const result = employeeSchema.safeParse(body);
 
     if (!result.success) {
-      const fieldErrors: Record<string, string[]> = {};
-      for (const issue of result.error.issues) {
-        const field = issue.path.join(".");
-        if (!fieldErrors[field]) fieldErrors[field] = [];
-        fieldErrors[field].push(issue.message);
-      }
-      return validationErrorResponse(fieldErrors);
+      return validationErrorResponse(zodFieldErrors(result.error));
     }
 
     // Check existence
@@ -102,25 +105,76 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const employee = await prisma.employee.update({
-      where: { id },
-      data: {
-        code: result.data.code,
-        fullName: result.data.fullName,
-        email: result.data.email,
-        password: result.data.password || "123456",
-        phone: result.data.phone || null,
-        address: result.data.address || null,
-        hireDate: new Date(result.data.hireDate),
-        status: result.data.status,
-        baseSalary: result.data.baseSalary,
-        departmentId: result.data.departmentId,
-        positionId: result.data.positionId,
-      },
-      include: {
-        department: { select: { id: true, name: true } },
-        position: { select: { id: true, name: true } },
-      },
+    // Verify department & position exist (mirror POST)
+    const [department, position] = await Promise.all([
+      prisma.department.findUnique({ where: { id: result.data.departmentId } }),
+      prisma.position.findUnique({ where: { id: result.data.positionId } }),
+    ]);
+    if (!department) {
+      return validationErrorResponse({ departmentId: ["Departemen tidak ditemukan"] });
+    }
+    if (!position) {
+      return validationErrorResponse({ positionId: ["Jabatan tidak ditemukan"] });
+    }
+
+    const data: Record<string, unknown> = {
+      code: result.data.code,
+      fullName: result.data.fullName,
+      email: result.data.email,
+      phone: result.data.phone || null,
+      address: result.data.address || null,
+      hireDate: new Date(result.data.hireDate),
+      status: result.data.status,
+      baseSalary: result.data.baseSalary,
+      departmentId: result.data.departmentId,
+      positionId: result.data.positionId,
+    };
+
+    // Password hanya diganti bila diisi — kosong berarti pertahankan yang lama.
+    if (result.data.password) {
+      data.password = await bcrypt.hash(result.data.password, 10);
+    }
+
+    const { allowanceIds, deductionIds } = result.data;
+
+    const employee = await prisma.$transaction(async (tx) => {
+      const updated = await tx.employee.update({
+        where: { id },
+        data,
+        include: {
+          department: { select: { id: true, name: true } },
+          position: { select: { id: true, name: true } },
+        },
+      });
+
+      // Sinkronkan assignment tunjangan/potongan bila daftar dikirim (full replace).
+      if (allowanceIds) {
+        await tx.employeeAllowance.deleteMany({ where: { employeeId: id } });
+        if (allowanceIds.length > 0) {
+          await tx.employeeAllowance.createMany({
+            data: allowanceIds.map((allowanceId) => ({
+              employeeId: id,
+              allowanceId,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
+
+      if (deductionIds) {
+        await tx.employeeDeduction.deleteMany({ where: { employeeId: id } });
+        if (deductionIds.length > 0) {
+          await tx.employeeDeduction.createMany({
+            data: deductionIds.map((deductionId) => ({
+              employeeId: id,
+              deductionId,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
+
+      return updated;
     });
 
     return successResponse({
@@ -138,6 +192,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
  */
 export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const { id } = await params;
 
     const existing = await prisma.employee.findUnique({

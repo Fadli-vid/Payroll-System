@@ -13,7 +13,6 @@ import {
   FileSpreadsheet,
   Stethoscope,
   XCircle,
-  HelpCircle,
 } from "lucide-react";
 
 import {
@@ -32,7 +31,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/src/components/ui/select";
-import { formatTime } from "@/src/utils/format";
+import { formatTimeUTC } from "@/src/utils/format";
+import { MONTH_NAMES, getYearOptions } from "@/src/lib/constants";
+import { apiErrorMessage } from "@/src/lib/api-client";
 
 // ─── Interfaces ──────────────────────────────────────────
 
@@ -59,21 +60,6 @@ interface Summary {
   totalLateMinutes: number;
   totalOvertimeHours: number;
 }
-
-const MONTH_NAMES = [
-  "Januari",
-  "Februari",
-  "Maret",
-  "April",
-  "Mei",
-  "Juni",
-  "Juli",
-  "Agustus",
-  "September",
-  "Oktober",
-  "November",
-  "Desember",
-];
 
 const DAY_NAMES = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 
@@ -109,8 +95,8 @@ export default function EmployeeAttendancePage() {
         setRecords(res.data.records || []);
         setSummary(res.data.summary || null);
       }
-    } catch {
-      toast.error("Gagal mengambil data kehadiran");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Gagal mengambil data kehadiran"));
     } finally {
       setIsLoading(false);
     }
@@ -120,9 +106,9 @@ export default function EmployeeAttendancePage() {
     fetchAttendance();
   }, [fetchAttendance]);
 
-  // Calendar Math
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const firstDayOfWeek = new Date(year, month - 1, 1).getDay(); // 0 = Sun
+  // Calendar Math — konsisten UTC dengan recordMap (tanggal disimpan UTC midnight)
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const firstDayOfWeek = new Date(Date.UTC(year, month - 1, 1)).getUTCDay(); // 0 = Sun
 
   // Create lookup map date -> AttendanceRecord
   const recordMap = new Map<number, AttendanceRecord>();
@@ -164,13 +150,18 @@ export default function EmployeeAttendancePage() {
         </div>
 
         {/* Period Navigation */}
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={handlePrevMonth}>
+        <div className="flex w-full items-center gap-2 sm:w-auto">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handlePrevMonth}
+            aria-label="Bulan sebelumnya"
+          >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-initial">
             <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>
-              <SelectTrigger className="w-[130px]">
+              <SelectTrigger className="w-full min-w-0 sm:w-[130px]">
                 <SelectValue>{MONTH_NAMES[month - 1]}</SelectValue>
               </SelectTrigger>
               <SelectContent>
@@ -183,11 +174,11 @@ export default function EmployeeAttendancePage() {
             </Select>
 
             <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
-              <SelectTrigger className="w-[100px]">
+              <SelectTrigger className="w-full min-w-0 sm:w-[100px]">
                 <SelectValue>{year}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {[2024, 2025, 2026, 2027].map((y) => (
+                {getYearOptions().map((y) => (
                   <SelectItem key={y} value={String(y)}>
                     {y}
                   </SelectItem>
@@ -195,7 +186,12 @@ export default function EmployeeAttendancePage() {
               </SelectContent>
             </Select>
           </div>
-          <Button variant="outline" size="icon" onClick={handleNextMonth}>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handleNextMonth}
+            aria-label="Bulan berikutnya"
+          >
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
@@ -219,7 +215,7 @@ export default function EmployeeAttendancePage() {
             </div>
             <div className="text-xl font-bold mt-1">
               {summary.lateCount} Hari{" "}
-              <span className="text-xs font-normal text-muted-foreground">
+              <span className="block text-xs font-normal text-muted-foreground sm:inline">
                 ({summary.totalLateMinutes} mnt)
               </span>
             </div>
@@ -266,7 +262,7 @@ export default function EmployeeAttendancePage() {
             <span>
               Kalender Kehadiran &mdash; {MONTH_NAMES[month - 1]} {year}
             </span>
-            <div className="flex items-center gap-3 text-xs font-normal">
+            <div className="hidden items-center gap-3 text-xs font-normal sm:flex">
               <div className="flex items-center gap-1">
                 <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Hadir
               </div>
@@ -291,7 +287,74 @@ export default function EmployeeAttendancePage() {
               Memuat kalender kehadiran...
             </div>
           ) : (
-            <div className="grid grid-cols-7 gap-1 sm:gap-2">
+            <>
+            {/* Mobile: daftar harian (grid 7 kolom tidak terbaca di <640px) */}
+            <div className="divide-y rounded-lg border sm:hidden">
+              {Array.from({ length: daysInMonth }).map((_, idx) => {
+                const dayNumber = idx + 1;
+                const rec = recordMap.get(dayNumber);
+                const isSunday = (firstDayOfWeek + idx) % 7 === 0;
+                const cfg = rec ? STATUS_CONFIG[rec.status] : null;
+
+                return (
+                  <div
+                    key={`list-${dayNumber}`}
+                    className="flex min-h-12 items-center gap-3 px-3 py-2"
+                  >
+                    <div className="w-10 shrink-0 text-center">
+                      <div
+                        className={`text-sm font-bold ${
+                          isSunday ? "text-red-500" : "text-foreground"
+                        }`}
+                      >
+                        {dayNumber}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">
+                        {DAY_NAMES[(firstDayOfWeek + idx) % 7]}
+                      </div>
+                    </div>
+                    <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+                      {rec ? (
+                        <>
+                          <div className="truncate">
+                            In:{" "}
+                            <span className="font-semibold text-foreground">
+                              {rec.checkIn ? formatTimeUTC(rec.checkIn) : "—"}
+                            </span>
+                            {" • "}Out:{" "}
+                            <span className="font-semibold text-foreground">
+                              {rec.checkOut ? formatTimeUTC(rec.checkOut) : "—"}
+                            </span>
+                          </div>
+                          {rec.lateMinutes > 0 && (
+                            <div className="font-semibold text-amber-600 dark:text-amber-400">
+                              +{rec.lateMinutes} mnt terlambat
+                            </div>
+                          )}
+                          {rec.overtimeHours > 0 && (
+                            <div className="font-semibold text-primary">
+                              Lembur {rec.overtimeHours} jam
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="italic">
+                          {isSunday ? "Libur Akhir Pekan" : "Tidak ada data"}
+                        </span>
+                      )}
+                    </div>
+                    {rec && cfg && (
+                      <Badge variant={cfg.badgeVariant} className="shrink-0 text-[10px]">
+                        {cfg.label}
+                      </Badge>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop/tablet: kalender grid */}
+            <div className="hidden grid-cols-7 gap-2 sm:grid">
               {/* Day Headers */}
               {DAY_NAMES.map((day, idx) => (
                 <div
@@ -349,12 +412,12 @@ export default function EmployeeAttendancePage() {
                       <div className="space-y-0.5 text-[11px]">
                         {rec.checkIn && (
                           <div className="text-muted-foreground truncate">
-                            In: <span className="font-semibold text-foreground">{formatTime(rec.checkIn)}</span>
+                            In: <span className="font-semibold text-foreground">{formatTimeUTC(rec.checkIn)}</span>
                           </div>
                         )}
                         {rec.checkOut && (
                           <div className="text-muted-foreground truncate">
-                            Out: <span className="font-semibold text-foreground">{formatTime(rec.checkOut)}</span>
+                            Out: <span className="font-semibold text-foreground">{formatTimeUTC(rec.checkOut)}</span>
                           </div>
                         )}
                         {rec.lateMinutes > 0 && (
@@ -377,6 +440,7 @@ export default function EmployeeAttendancePage() {
                 );
               })}
             </div>
+            </>
           )}
         </CardContent>
       </Card>

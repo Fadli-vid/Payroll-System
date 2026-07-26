@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, memo } from "react";
 import axios from "axios";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -47,7 +47,6 @@ import {
   DropdownMenuTrigger,
 } from "@/src/components/ui/dropdown-menu";
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -58,6 +57,9 @@ import { DataTable, type Column } from "@/src/components/layout/data-table";
 import { ConfirmDialog } from "@/src/components/layout/confirm-dialog";
 import { attendanceSchema, type AttendanceFormValues } from "@/src/types";
 import { ATTENDANCE_STATUS_LABELS } from "@/src/lib/constants";
+import { formatTimeUTC, todayLocalISO } from "@/src/utils/format";
+import { getAttendanceStatusVariant } from "@/src/utils/status";
+import { fetchAllPages, apiErrorMessage } from "@/src/lib/api-client";
 
 // ─── Bulk Attendance Types ────────────────────────────────
 
@@ -96,50 +98,166 @@ interface EmployeeLookup {
 
 // ─── Helpers ─────────────────────────────────────────────
 
-function getStatusVariant(status: string) {
-  switch (status) {
-    case "PRESENT":
-      return "default";
-    case "LATE":
-      return "secondary";
-    case "LEAVE":
-    case "SICK":
-    case "VACATION":
-      return "outline";
-    case "ABSENT":
-      return "destructive";
-    default:
-      return "secondary";
-  }
-}
-
-function formatTimeFromISO(isoStr: string | null): string {
-  if (!isoStr) return "—";
-  const d = new Date(isoStr);
-  return d.toLocaleTimeString("id-ID", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
-
-function extractTimeHHMM(isoStr: string | null): string {
-  if (!isoStr) return "";
-  const d = new Date(isoStr);
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${hh}:${mm}`;
-}
-
-function formatDateShort(isoStr: string): string {
+// Tanggal attendance disimpan UTC midnight — render dengan timeZone UTC
+// agar tidak bergeser hari di timezone mana pun.
+function formatDateWithDay(isoStr: string): string {
   const d = new Date(isoStr);
   return d.toLocaleDateString("id-ID", {
     weekday: "short",
     day: "numeric",
     month: "short",
     year: "numeric",
+    timeZone: "UTC",
   });
 }
+
+// ─── Bulk Entry Row (memoized — mencegah 100+ baris re-render per ketikan) ──
+
+const BulkEntryRow = memo(function BulkEntryRow({
+  entry,
+  index,
+  onChange,
+}: {
+  entry: BulkEntry;
+  index: number;
+  onChange: (index: number, field: keyof BulkEntry, value: string) => void;
+}) {
+  const timeDisabled = !["PRESENT", "LATE"].includes(entry.status);
+  return (
+    <TableRow>
+      <TableCell>
+        <div>
+          <div className="font-medium text-sm">{entry.employeeName}</div>
+          <div className="text-xs text-muted-foreground">{entry.employeeCode}</div>
+        </div>
+      </TableCell>
+      <TableCell>
+        <Input
+          type="time"
+          value={entry.checkIn}
+          onChange={(e) => onChange(index, "checkIn", e.target.value)}
+          className="h-8 text-sm"
+          disabled={timeDisabled}
+          aria-label={`Jam masuk ${entry.employeeName}`}
+        />
+      </TableCell>
+      <TableCell>
+        <Input
+          type="time"
+          value={entry.checkOut}
+          onChange={(e) => onChange(index, "checkOut", e.target.value)}
+          className="h-8 text-sm"
+          disabled={timeDisabled}
+          aria-label={`Jam keluar ${entry.employeeName}`}
+        />
+      </TableCell>
+      <TableCell>
+        <Select
+          value={entry.status}
+          onValueChange={(val) => {
+            if (val) onChange(index, "status", val);
+          }}
+        >
+          <SelectTrigger className="h-8 text-sm">
+            <SelectValue>
+              {(val: string) => ATTENDANCE_STATUS_LABELS[val] || val}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {Object.entries(ATTENDANCE_STATUS_LABELS).map(([value, label]) => (
+              <SelectItem key={value} value={value}>
+                {label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </TableCell>
+      <TableCell>
+        <Input
+          value={entry.notes}
+          onChange={(e) => onChange(index, "notes", e.target.value)}
+          placeholder="—"
+          className="h-8 text-sm"
+          aria-label={`Catatan ${entry.employeeName}`}
+        />
+      </TableCell>
+    </TableRow>
+  );
+});
+
+// ─── Bulk Entry Card (varian mobile <sm — state & callback sama dengan row) ──
+
+const BulkEntryCard = memo(function BulkEntryCard({
+  entry,
+  index,
+  onChange,
+}: {
+  entry: BulkEntry;
+  index: number;
+  onChange: (index: number, field: keyof BulkEntry, value: string) => void;
+}) {
+  const timeDisabled = !["PRESENT", "LATE"].includes(entry.status);
+  return (
+    <div className="space-y-2 border-b p-3 last:border-b-0">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium">{entry.employeeName}</div>
+          <div className="text-xs text-muted-foreground">{entry.employeeCode}</div>
+        </div>
+        <Select
+          value={entry.status}
+          onValueChange={(val) => {
+            if (val) onChange(index, "status", val);
+          }}
+        >
+          <SelectTrigger className="h-9 w-36 shrink-0 text-sm">
+            <SelectValue>
+              {(val: string) => ATTENDANCE_STATUS_LABELS[val] || val}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {Object.entries(ATTENDANCE_STATUS_LABELS).map(([value, label]) => (
+              <SelectItem key={value} value={value}>
+                {label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <span className="text-[10px] font-medium text-muted-foreground">Jam Masuk</span>
+          <Input
+            type="time"
+            value={entry.checkIn}
+            onChange={(e) => onChange(index, "checkIn", e.target.value)}
+            disabled={timeDisabled}
+            aria-label={`Jam masuk ${entry.employeeName}`}
+            className="text-sm"
+          />
+        </div>
+        <div className="space-y-1">
+          <span className="text-[10px] font-medium text-muted-foreground">Jam Keluar</span>
+          <Input
+            type="time"
+            value={entry.checkOut}
+            onChange={(e) => onChange(index, "checkOut", e.target.value)}
+            disabled={timeDisabled}
+            aria-label={`Jam keluar ${entry.employeeName}`}
+            className="text-sm"
+          />
+        </div>
+      </div>
+      <Input
+        value={entry.notes}
+        onChange={(e) => onChange(index, "notes", e.target.value)}
+        placeholder="Catatan (opsional)"
+        aria-label={`Catatan ${entry.employeeName}`}
+        className="text-sm"
+      />
+    </div>
+  );
+});
 
 // ─── Page Component ──────────────────────────────────────
 
@@ -159,6 +277,7 @@ export default function AttendancePage() {
 
   // Lookups
   const [employees, setEmployees] = useState<EmployeeLookup[]>([]);
+  const [employeeTotal, setEmployeeTotal] = useState(0);
 
   // Dialog state
   const [formOpen, setFormOpen] = useState(false);
@@ -170,9 +289,10 @@ export default function AttendancePage() {
 
   // Bulk attendance state
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkDate, setBulkDate] = useState(new Date().toISOString().split("T")[0]);
+  const [bulkDate, setBulkDate] = useState(todayLocalISO());
   const [bulkEntries, setBulkEntries] = useState<BulkEntry[]>([]);
   const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
+  const [bulkErrors, setBulkErrors] = useState<string[]>([]);
 
   // ─── Form ──────────────────────────────────────────────
 
@@ -193,20 +313,17 @@ export default function AttendancePage() {
   useEffect(() => {
     async function fetchEmployees() {
       try {
-        const res = await axios.get(
-          "/api/employees?pageSize=500&sortBy=fullName&sortOrder=asc&status=ACTIVE"
+        // Ambil SEMUA halaman — API membatasi pageSize 100 per permintaan
+        const { items, total } = await fetchAllPages<EmployeeLookup>(
+          "/api/employees",
+          { sortBy: "fullName", sortOrder: "asc", status: "ACTIVE" }
         );
-        if (res.data.success) {
-          setEmployees(
-            res.data.data.data.map((e: EmployeeLookup) => ({
-              id: e.id,
-              code: e.code,
-              fullName: e.fullName,
-            }))
-          );
-        }
-      } catch {
-        // Silently fail
+        setEmployees(
+          items.map((e) => ({ id: e.id, code: e.code, fullName: e.fullName }))
+        );
+        setEmployeeTotal(total);
+      } catch (err) {
+        toast.error(apiErrorMessage(err, "Gagal memuat daftar karyawan"));
       }
     }
     fetchEmployees();
@@ -250,7 +367,7 @@ export default function AttendancePage() {
     setEditingRecord(null);
     form.reset({
       employeeId: "",
-      date: new Date().toISOString().split("T")[0],
+      date: todayLocalISO(),
       status: "PRESENT",
       checkIn: "08:00",
       checkOut: "17:00",
@@ -265,8 +382,8 @@ export default function AttendancePage() {
       employeeId: rec.employeeId,
       date: rec.date.split("T")[0],
       status: rec.status as AttendanceFormValues["status"],
-      checkIn: extractTimeHHMM(rec.checkIn),
-      checkOut: extractTimeHHMM(rec.checkOut),
+      checkIn: formatTimeUTC(rec.checkIn, ""),
+      checkOut: formatTimeUTC(rec.checkOut, ""),
       notes: rec.notes ?? "",
     });
     setFormOpen(true);
@@ -282,7 +399,19 @@ export default function AttendancePage() {
       setIsSubmitting(true);
 
       if (editingRecord) {
-        await axios.put(`/api/attendance/${editingRecord.id}`, values);
+        // Bila jam masuk/keluar tidak berubah, kirim override lembur & telat
+        // tersimpan agar tidak dihitung ulang (mis. lembur manual hari libur).
+        const timesUnchanged =
+          (values.checkIn || "") === formatTimeUTC(editingRecord.checkIn, "") &&
+          (values.checkOut || "") === formatTimeUTC(editingRecord.checkOut, "");
+        const payload = timesUnchanged
+          ? {
+              ...values,
+              overtimeHours: editingRecord.overtimeHours,
+              lateMinutes: editingRecord.lateMinutes,
+            }
+          : values;
+        await axios.put(`/api/attendance/${editingRecord.id}`, payload);
         toast.success("Data kehadiran berhasil diperbarui");
       } else {
         await axios.post("/api/attendance", values);
@@ -336,8 +465,8 @@ export default function AttendancePage() {
   // ─── Bulk Attendance Handlers ──────────────────────────
 
   const openBulkDialog = () => {
-    const today = new Date().toISOString().split("T")[0];
-    setBulkDate(today);
+    setBulkDate(todayLocalISO());
+    setBulkErrors([]);
     setBulkEntries(
       employees.map((e) => ({
         employeeId: e.id,
@@ -352,23 +481,26 @@ export default function AttendancePage() {
     setBulkOpen(true);
   };
 
-  const updateBulkEntry = (index: number, field: keyof BulkEntry, value: string) => {
-    setBulkEntries((prev) => {
-      const updated = [...prev];
-      updated[index] = { ...updated[index], [field]: value };
-      // If status is not PRESENT/LATE, clear check-in/check-out
-      if (field === "status" && !["PRESENT", "LATE"].includes(value)) {
-        updated[index].checkIn = "";
-        updated[index].checkOut = "";
-      }
-      // If status changed to PRESENT, set default times
-      if (field === "status" && value === "PRESENT" && !updated[index].checkIn) {
-        updated[index].checkIn = "08:00";
-        updated[index].checkOut = "17:00";
-      }
-      return updated;
-    });
-  };
+  const updateBulkEntry = useCallback(
+    (index: number, field: keyof BulkEntry, value: string) => {
+      setBulkEntries((prev) => {
+        const updated = [...prev];
+        updated[index] = { ...updated[index], [field]: value };
+        // If status is not PRESENT/LATE, clear check-in/check-out
+        if (field === "status" && !["PRESENT", "LATE"].includes(value)) {
+          updated[index].checkIn = "";
+          updated[index].checkOut = "";
+        }
+        // If status changed to PRESENT, set default times
+        if (field === "status" && value === "PRESENT" && !updated[index].checkIn) {
+          updated[index].checkIn = "08:00";
+          updated[index].checkOut = "17:00";
+        }
+        return updated;
+      });
+    },
+    []
+  );
 
   const setAllPresent = () => {
     setBulkEntries((prev) =>
@@ -390,25 +522,31 @@ export default function AttendancePage() {
         date: bulkDate,
         entries: bulkEntries.map((e) => ({
           employeeId: e.employeeId,
-          checkIn: e.checkIn || null,
-          checkOut: e.checkOut || null,
+          checkIn: e.checkIn || undefined,
+          checkOut: e.checkOut || undefined,
           status: e.status,
-          notes: e.notes || null,
+          notes: e.notes || undefined,
         })),
       };
       const res = await axios.post("/api/attendance/bulk", payload);
       const result = res.data.data;
-      toast.success(
-        `Berhasil: ${result.created} disimpan, ${result.skipped} dilewati (sudah ada)`
-      );
-      setBulkOpen(false);
+      const errors: string[] = result?.errors ?? [];
+
+      if (errors.length > 0) {
+        setBulkErrors(errors);
+        toast.warning(
+          `${result.created} disimpan, ${result.skipped} dilewati — periksa rincian di dialog.`
+        );
+        // Dialog tetap terbuka agar admin bisa membaca rincian error
+      } else {
+        toast.success(
+          `Berhasil: ${result.created} disimpan, ${result.skipped} dilewati (sudah ada)`
+        );
+        setBulkOpen(false);
+      }
       fetchRecords();
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.data) {
-        toast.error(error.response.data.message || "Gagal menyimpan absensi massal");
-      } else {
-        toast.error("Gagal menyimpan absensi massal");
-      }
+      toast.error(apiErrorMessage(error, "Gagal menyimpan absensi massal"));
     } finally {
       setIsBulkSubmitting(false);
     }
@@ -433,7 +571,7 @@ export default function AttendancePage() {
       sortable: true,
       className: "w-[160px]",
       render: (row) => (
-        <span className="text-sm">{formatDateShort(row.date)}</span>
+        <span className="text-sm">{formatDateWithDay(row.date)}</span>
       ),
     },
     {
@@ -442,7 +580,7 @@ export default function AttendancePage() {
       sortable: true,
       className: "w-[120px]",
       render: (row) => (
-        <Badge variant={getStatusVariant(row.status)} className="text-xs">
+        <Badge variant={getAttendanceStatusVariant(row.status)} className="text-xs">
           {ATTENDANCE_STATUS_LABELS[row.status] ?? row.status}
         </Badge>
       ),
@@ -453,7 +591,7 @@ export default function AttendancePage() {
       className: "w-[80px] hidden sm:table-cell",
       render: (row) => (
         <span className="text-sm font-mono">
-          {formatTimeFromISO(row.checkIn)}
+          {formatTimeUTC(row.checkIn)}
         </span>
       ),
     },
@@ -463,7 +601,7 @@ export default function AttendancePage() {
       className: "w-[80px] hidden sm:table-cell",
       render: (row) => (
         <span className="text-sm font-mono">
-          {formatTimeFromISO(row.checkOut)}
+          {formatTimeUTC(row.checkOut)}
         </span>
       ),
     },
@@ -513,7 +651,7 @@ export default function AttendancePage() {
       render: (row) => (
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium hover:bg-accent hover:text-accent-foreground focus-visible:outline-none"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium hover:bg-accent hover:text-accent-foreground focus-visible:outline-none max-sm:h-10 max-sm:w-10"
           >
             <span className="sr-only">Menu</span>
             <svg
@@ -575,7 +713,7 @@ export default function AttendancePage() {
           {/* Filter bar */}
           <div className="flex flex-wrap items-end gap-3 mb-4">
             {/* Status filter */}
-            <div className="space-y-1">
+            <div className="w-full space-y-1 sm:w-auto">
               <Label className="text-xs text-muted-foreground">Status</Label>
               <Select
                 value={statusFilter}
@@ -586,7 +724,7 @@ export default function AttendancePage() {
                   }
                 }}
               >
-                <SelectTrigger className="w-[140px] h-9">
+                <SelectTrigger className="w-full sm:w-[140px] h-9">
                   <SelectValue placeholder="Semua" />
                 </SelectTrigger>
                 <SelectContent>
@@ -603,7 +741,7 @@ export default function AttendancePage() {
             </div>
 
             {/* Date range */}
-            <div className="space-y-1">
+            <div className="w-[calc(50%-0.375rem)] space-y-1 sm:w-auto">
               <Label className="text-xs text-muted-foreground">Dari</Label>
               <Input
                 type="date"
@@ -612,10 +750,10 @@ export default function AttendancePage() {
                   setDateFrom(e.target.value);
                   setPage(1);
                 }}
-                className="w-[150px] h-9"
+                className="w-full sm:w-[150px] h-9"
               />
             </div>
-            <div className="space-y-1">
+            <div className="w-[calc(50%-0.375rem)] space-y-1 sm:w-auto">
               <Label className="text-xs text-muted-foreground">Sampai</Label>
               <Input
                 type="date"
@@ -624,7 +762,7 @@ export default function AttendancePage() {
                   setDateTo(e.target.value);
                   setPage(1);
                 }}
-                className="w-[150px] h-9"
+                className="w-full sm:w-[150px] h-9"
               />
             </div>
 
@@ -797,6 +935,11 @@ export default function AttendancePage() {
                   type="time"
                   {...form.register("checkIn")}
                 />
+                {form.formState.errors.checkIn && (
+                  <p className="text-sm text-destructive">
+                    {form.formState.errors.checkIn.message}
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="checkOut">Jam Keluar</Label>
@@ -805,6 +948,11 @@ export default function AttendancePage() {
                   type="time"
                   {...form.register("checkOut")}
                 />
+                {form.formState.errors.checkOut && (
+                  <p className="text-sm text-destructive">
+                    {form.formState.errors.checkOut.message}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -826,7 +974,7 @@ export default function AttendancePage() {
               />
             </div>
 
-            <DialogFooter className="gap-2 sm:gap-0 pt-2">
+            <DialogFooter className="pt-2">
               <Button
                 type="button"
                 variant="outline"
@@ -852,7 +1000,7 @@ export default function AttendancePage() {
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
         title="Hapus Data Kehadiran"
-        description={`Apakah Anda yakin ingin menghapus data kehadiran ${deletingRecord?.employee.fullName} pada ${deletingRecord ? formatDateShort(deletingRecord.date) : ""}?`}
+        description={`Apakah Anda yakin ingin menghapus data kehadiran ${deletingRecord?.employee.fullName} pada ${deletingRecord ? formatDateWithDay(deletingRecord.date) : ""}?`}
         confirmLabel="Ya, Hapus"
         variant="destructive"
         isLoading={isDeleting}
@@ -861,7 +1009,7 @@ export default function AttendancePage() {
 
       {/* Bulk Attendance Dialog */}
       <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
-        <DialogContent className="sm:max-w-[900px] max-h-[90vh] flex flex-col">
+        <DialogContent className="flex flex-col overflow-hidden sm:max-w-[900px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Users className="h-5 w-5" />
@@ -875,13 +1023,13 @@ export default function AttendancePage() {
 
           {/* Date picker + quick actions */}
           <div className="flex flex-wrap items-end gap-3 py-2">
-            <div className="space-y-1">
+            <div className="w-full space-y-1 sm:w-auto">
               <Label className="text-xs text-muted-foreground">Tanggal Absensi</Label>
               <Input
                 type="date"
                 value={bulkDate}
                 onChange={(e) => setBulkDate(e.target.value)}
-                className="w-[180px] h-9"
+                className="w-full sm:w-[180px] h-9"
               />
             </div>
             <Button
@@ -905,81 +1053,71 @@ export default function AttendancePage() {
             Untuk Cuti/Sakit/Liburan, pilih status lalu jam masuk &amp; keluar akan dikosongkan.
           </div>
 
-          {/* Scrollable employee table */}
-          <div className="flex-1 overflow-y-auto border rounded-lg" style={{ maxHeight: "400px" }}>
-            <Table>
-              <TableHeader className="sticky top-0 bg-background z-10">
-                <TableRow>
-                  <TableHead className="w-[180px]">Karyawan</TableHead>
-                  <TableHead className="w-[110px]">Jam Masuk</TableHead>
-                  <TableHead className="w-[110px]">Jam Keluar</TableHead>
-                  <TableHead className="w-[140px]">Status</TableHead>
-                  <TableHead>Catatan</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {bulkEntries.map((entry, idx) => (
-                  <TableRow key={entry.employeeId}>
-                    <TableCell>
-                      <div>
-                        <div className="font-medium text-sm">{entry.employeeName}</div>
-                        <div className="text-xs text-muted-foreground">{entry.employeeCode}</div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        type="time"
-                        value={entry.checkIn}
-                        onChange={(e) => updateBulkEntry(idx, "checkIn", e.target.value)}
-                        className="h-8 text-sm"
-                        disabled={!["PRESENT", "LATE"].includes(entry.status)}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        type="time"
-                        value={entry.checkOut}
-                        onChange={(e) => updateBulkEntry(idx, "checkOut", e.target.value)}
-                        className="h-8 text-sm"
-                        disabled={!["PRESENT", "LATE"].includes(entry.status)}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Select
-                        value={entry.status}
-                        onValueChange={(val) => { if (val) updateBulkEntry(idx, "status", val); }}
-                      >
-                        <SelectTrigger className="h-8 text-sm">
-                          <SelectValue>
-                            {(val: string) => ATTENDANCE_STATUS_LABELS[val] || val}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Object.entries(ATTENDANCE_STATUS_LABELS).map(
-                            ([value, label]) => (
-                              <SelectItem key={value} value={value}>
-                                {label}
-                              </SelectItem>
-                            )
-                          )}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        value={entry.notes}
-                        onChange={(e) => updateBulkEntry(idx, "notes", e.target.value)}
-                        placeholder="—"
-                        className="h-8 text-sm"
-                      />
-                    </TableCell>
-                  </TableRow>
+          {/* Truncation warning */}
+          {employeeTotal > employees.length && (
+            <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              Hanya {employees.length} dari {employeeTotal} karyawan yang berhasil
+              dimuat — sebagian karyawan tidak akan tercatat. Muat ulang halaman.
+            </div>
+          )}
+
+          {/* Bulk errors panel */}
+          {bulkErrors.length > 0 && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+              <p className="mb-1 text-xs font-semibold text-destructive">
+                Sebagian entri tidak tersimpan:
+              </p>
+              <ul className="max-h-24 space-y-0.5 overflow-y-auto text-xs text-muted-foreground">
+                {bulkErrors.map((err, i) => (
+                  <li key={i}>• {err}</li>
                 ))}
-              </TableBody>
-            </Table>
+              </ul>
+            </div>
+          )}
+
+          {/* Scrollable employee list — SATU kontainer memiliki kedua sumbu
+              scroll agar sticky header benar-benar menempel (Table primitive
+              menyisipkan scroller-x sendiri yang mematahkan sticky) */}
+          <div className="min-h-0 flex-1 overflow-auto overscroll-contain rounded-lg border max-h-[45dvh] sm:max-h-[400px]">
+            {/* ≥sm: tabel */}
+            <div className="hidden sm:block">
+              <table className="w-full caption-bottom text-sm">
+                <TableHeader className="sticky top-0 bg-background z-10">
+                  <TableRow>
+                    <TableHead className="w-[180px]">Karyawan</TableHead>
+                    <TableHead className="w-[110px]">Jam Masuk</TableHead>
+                    <TableHead className="w-[110px]">Jam Keluar</TableHead>
+                    <TableHead className="w-[140px]">Status</TableHead>
+                    <TableHead>Catatan</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {bulkEntries.map((entry, idx) => (
+                    <BulkEntryRow
+                      key={entry.employeeId}
+                      entry={entry}
+                      index={idx}
+                      onChange={updateBulkEntry}
+                    />
+                  ))}
+                </TableBody>
+              </table>
+            </div>
+            {/* <sm: kartu bertumpuk per karyawan */}
+            <div className="sm:hidden">
+              {bulkEntries.map((entry, idx) => (
+                <BulkEntryCard
+                  key={entry.employeeId}
+                  entry={entry}
+                  index={idx}
+                  onChange={updateBulkEntry}
+                />
+              ))}
+            </div>
           </div>
 
-          <DialogFooter className="gap-2 sm:gap-0 pt-2">
+          <DialogFooter className="pt-2">
             <Button
               type="button"
               variant="outline"

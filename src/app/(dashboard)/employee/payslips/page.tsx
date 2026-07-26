@@ -1,17 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import {
-  FileText,
-  Printer,
-  Eye,
-  Building2,
-  UserCheck,
-  Calendar,
-  CheckCircle2,
-} from "lucide-react";
+import { FileText, Printer, Eye } from "lucide-react";
 
 import {
   Card,
@@ -38,21 +30,8 @@ import {
   TableRow,
 } from "@/src/components/ui/table";
 import { formatCurrency, formatDate } from "@/src/utils/format";
-
-const MONTH_NAMES = [
-  "Januari",
-  "Februari",
-  "Maret",
-  "April",
-  "Mei",
-  "Juni",
-  "Juli",
-  "Agustus",
-  "September",
-  "Oktober",
-  "November",
-  "Desember",
-];
+import { MONTH_NAMES, PAYROLL_STATUS_LABELS } from "@/src/lib/constants";
+import { apiErrorMessage } from "@/src/lib/api-client";
 
 interface PayrollDetailItem {
   id: string;
@@ -91,8 +70,6 @@ export default function EmployeePayslipsPage() {
   const [selectedPayslip, setSelectedPayslip] = useState<Payslip | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-  const printRef = useRef<HTMLDivElement>(null);
-
   const fetchPayslips = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -100,8 +77,8 @@ export default function EmployeePayslipsPage() {
       if (res.success && res.data) {
         setPayslips(res.data || []);
       }
-    } catch {
-      toast.error("Gagal mengambil data slip gaji");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Gagal mengambil data slip gaji"));
     } finally {
       setIsLoading(false);
     }
@@ -156,10 +133,13 @@ export default function EmployeePayslipsPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Periode</TableHead>
-                    <TableHead>Gaji Pokok</TableHead>
-                    <TableHead>Total Tunjangan</TableHead>
-                    <TableHead>Total Potongan</TableHead>
-                    <TableHead>Gaji Bersih (Take Home Pay)</TableHead>
+                    <TableHead className="hidden md:table-cell">Gaji Pokok</TableHead>
+                    <TableHead className="hidden md:table-cell">Total Tunjangan</TableHead>
+                    <TableHead className="hidden md:table-cell">Total Potongan</TableHead>
+                    <TableHead>
+                      <span className="md:hidden">Gaji Bersih</span>
+                      <span className="hidden md:inline">Gaji Bersih (Take Home Pay)</span>
+                    </TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="w-[100px]" />
                   </TableRow>
@@ -170,11 +150,11 @@ export default function EmployeePayslipsPage() {
                       <TableCell className="font-semibold">
                         {MONTH_NAMES[p.month - 1]} {p.year}
                       </TableCell>
-                      <TableCell>{formatCurrency(p.basicSalary)}</TableCell>
-                      <TableCell className="text-emerald-600 dark:text-emerald-400 font-medium">
+                      <TableCell className="hidden md:table-cell">{formatCurrency(p.basicSalary)}</TableCell>
+                      <TableCell className="hidden text-emerald-600 dark:text-emerald-400 font-medium md:table-cell">
                         + {formatCurrency(p.allowanceTotal + p.overtimePay + p.bonus)}
                       </TableCell>
-                      <TableCell className="text-destructive font-medium">
+                      <TableCell className="hidden text-destructive font-medium md:table-cell">
                         - {formatCurrency(p.deductionTotal)}
                       </TableCell>
                       <TableCell className="font-bold text-emerald-600 dark:text-emerald-400 text-base">
@@ -182,7 +162,7 @@ export default function EmployeePayslipsPage() {
                       </TableCell>
                       <TableCell>
                         <Badge variant={p.status === "PAID" ? "default" : "secondary"}>
-                          {p.status === "PAID" ? "Lunas (Dibayar)" : "Disetujui"}
+                          {PAYROLL_STATUS_LABELS[p.status] || p.status}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -207,16 +187,16 @@ export default function EmployeePayslipsPage() {
 
       {/* Detail & Printable Payslip Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[700px]">
           <DialogHeader className="print:hidden">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <DialogTitle className="text-lg">Detail Slip Gaji Karyawan</DialogTitle>
                 <DialogDescription>
                   Periode {selectedPayslip && `${MONTH_NAMES[selectedPayslip.month - 1]} ${selectedPayslip.year}`}
                 </DialogDescription>
               </div>
-              <Button size="sm" onClick={handlePrint} className="gap-2">
+              <Button size="sm" onClick={handlePrint} className="gap-2 self-start sm:self-auto">
                 <Printer className="h-4 w-4" />
                 Cetak / Download PDF
               </Button>
@@ -224,18 +204,18 @@ export default function EmployeePayslipsPage() {
           </DialogHeader>
 
           {selectedPayslip && (
-            <div ref={printRef} className="space-y-6 pt-2 text-foreground print:p-6 print:text-black">
+            <div className="print-area space-y-6 pt-2 text-foreground print:p-6 print:text-black">
               {/* Slip Header / Company Info */}
-              <div className="border-b pb-4 flex items-center justify-between">
+              <div className="border-b pb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h3 className="text-xl font-bold tracking-tight">SLIP GAJI KARYAWAN</h3>
                   <p className="text-xs text-muted-foreground">
                     Periode: <strong className="text-foreground">{MONTH_NAMES[selectedPayslip.month - 1]} {selectedPayslip.year}</strong>
                   </p>
                 </div>
-                <div className="text-right">
+                <div className="text-left sm:text-right">
                   <Badge variant="outline" className="text-xs font-semibold">
-                    STATUS: {selectedPayslip.status}
+                    STATUS: {(PAYROLL_STATUS_LABELS[selectedPayslip.status] || selectedPayslip.status).toUpperCase()}
                   </Badge>
                   <p className="text-[11px] text-muted-foreground mt-1">
                     Dibuat: {formatDate(selectedPayslip.createdAt)}
@@ -244,7 +224,7 @@ export default function EmployeePayslipsPage() {
               </div>
 
               {/* Employee Info Grid */}
-              <div className="grid grid-cols-2 gap-4 rounded-lg bg-muted/40 p-4 text-xs">
+              <div className="grid grid-cols-1 gap-4 rounded-lg bg-muted/40 p-4 text-xs sm:grid-cols-2 print:grid-cols-2">
                 <div className="space-y-1">
                   <div>
                     <span className="text-muted-foreground">NIK / Kode:</span>{" "}
@@ -256,7 +236,7 @@ export default function EmployeePayslipsPage() {
                   </div>
                   <div>
                     <span className="text-muted-foreground">Email:</span>{" "}
-                    {selectedPayslip.employee.email}
+                    <span className="break-all">{selectedPayslip.employee.email}</span>
                   </div>
                 </div>
 
@@ -282,7 +262,7 @@ export default function EmployeePayslipsPage() {
                     <TableHeader>
                       <TableRow className="bg-muted/50">
                         <TableHead>Komponen</TableHead>
-                        <TableHead>Kategori</TableHead>
+                        <TableHead className="hidden sm:table-cell print:table-cell">Kategori</TableHead>
                         <TableHead className="text-right">Jumlah (Rp)</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -297,7 +277,7 @@ export default function EmployeePayslipsPage() {
                               </div>
                             )}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="hidden sm:table-cell print:table-cell">
                             <span
                               className={`font-semibold ${
                                 item.type === "EARNING"
@@ -325,7 +305,7 @@ export default function EmployeePayslipsPage() {
               </div>
 
               {/* Summary Take-Home Pay Box */}
-              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 flex items-center justify-between">
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between print:flex-row">
                 <div>
                   <div className="text-xs text-muted-foreground font-medium">TOTAL PENDAPATAN BERSIH</div>
                   <div className="text-xs text-emerald-700 dark:text-emerald-400">Gaji Bersih (Take Home Pay)</div>

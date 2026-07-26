@@ -38,7 +38,11 @@ function LoginForm() {
       });
 
       const contentType = res.headers.get("content-type");
-      let data: any = {};
+      let data: {
+        success?: boolean;
+        message?: string;
+        data?: { user?: { role?: string } };
+      } = {};
 
       if (contentType && contentType.includes("application/json")) {
         data = await res.json();
@@ -61,9 +65,13 @@ function LoginForm() {
 
       router.push(targetPath);
       router.refresh();
-    } catch (err: any) {
-      setErrorMsg(err.message || "Terjadi kesalahan sistem saat login.");
-      toast.error(err.message || "Login gagal");
+    } catch (err) {
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : "Terjadi kesalahan sistem saat login.";
+      setErrorMsg(message);
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }
@@ -97,7 +105,7 @@ function LoginForm() {
               <Input
                 id="admin-id"
                 type="text"
-                placeholder="Admin (payrolladmin) atau Email Karyawan"
+                placeholder="ID Admin atau Email/NIK Karyawan"
                 value={id}
                 onChange={(e) => setId(e.target.value)}
                 className="pl-9 h-11"
@@ -127,8 +135,8 @@ function LoginForm() {
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                size="icon"
+                className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 onClick={() => setShowPassword(!showPassword)}
                 tabIndex={-1}
               >
@@ -138,10 +146,10 @@ function LoginForm() {
             </div>
           </div>
 
-          <div className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground space-y-1">
+          <div className="hidden rounded-md bg-muted/60 p-3 text-xs text-muted-foreground space-y-1 sm:block">
             <p className="font-semibold text-foreground">Informasi Akses Portal:</p>
-            <p>&bull; <strong>Admin</strong>: ID <code className="text-primary font-mono">payrolladmin</code> / Pass <code className="text-primary font-mono">payrolladmin</code></p>
-            <p>&bull; <strong>Karyawan</strong>: Gunakan Email Karyawan & Pass default <code className="text-primary font-mono">123456</code> (atau sesuai yang diatur Admin)</p>
+            <p>&bull; <strong>Admin</strong>: gunakan ID &amp; password admin dari administrator sistem.</p>
+            <p>&bull; <strong>Karyawan</strong>: gunakan email/NIK karyawan &amp; password yang diatur Admin.</p>
           </div>
         </CardContent>
 
@@ -171,7 +179,7 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <div className="relative min-h-screen flex items-center justify-center p-4 bg-background overflow-hidden selection:bg-primary selection:text-primary-foreground">
+    <div className="relative min-h-dvh flex items-center justify-center p-4 bg-background overflow-hidden selection:bg-primary selection:text-primary-foreground">
       {/* Background Decorative Gradients */}
       <div className="absolute -top-40 -left-40 w-96 h-96 bg-primary/20 rounded-full blur-3xl opacity-50 pointer-events-none" />
       <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-blue-600/20 rounded-full blur-3xl opacity-50 pointer-events-none" />

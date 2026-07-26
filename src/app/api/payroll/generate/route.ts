@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { requireAdmin } from "@/src/lib/authz";
 import { generateBatchPayroll } from "@/src/lib/payroll-engine";
 import { payrollGenerateSchema } from "@/src/types";
 import {
@@ -9,6 +10,9 @@ import {
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const body = await req.json();
     const validated = payrollGenerateSchema.safeParse(body);
 
@@ -37,11 +41,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error("POST /api/payroll/generate error:", error);
-    return errorResponse(
-      error instanceof Error
-        ? error.message
-        : "Gagal memproses pembuatan gaji",
-      500
-    );
+    return errorResponse("Gagal memproses pembuatan gaji", 500);
   }
 }

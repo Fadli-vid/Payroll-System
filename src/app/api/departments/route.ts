@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { requireAdmin } from "@/src/lib/authz";
 import { prisma } from "@/src/lib/prisma";
 import { departmentSchema } from "@/src/types";
 import {
@@ -13,6 +14,9 @@ import {
  */
 export async function GET(request: NextRequest) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const url = new URL(request.url);
     const { page, pageSize, search, sortBy, sortOrder, skip } =
       parseListParams(url);
@@ -73,6 +77,9 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const body = await request.json();
     const result = departmentSchema.safeParse(body);
 

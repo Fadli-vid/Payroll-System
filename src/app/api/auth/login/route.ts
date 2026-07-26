@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     // 1. Try Admin Login first (Case-insensitive check for Admin ID)
     if (verifyAdminCredentials(identityInput, passwordInput)) {
       const token = createSessionToken({
-        id: "payrolladmin",
+        id: "admin",
         role: "ADMIN",
         fullName: "Administrator",
         email: "admin@payroll.com",
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
 
       const response = successResponse({
         user: {
-          id: "payrolladmin",
+          id: "admin",
           name: "Administrator",
           email: "admin@payroll.com",
           role: "ADMIN",
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     if (employee) {
       const token = createSessionToken({
         id: employee.id,
-        role: "EMPLOYEE",
+        role: employee.role,
         employeeId: employee.id,
         fullName: employee.fullName,
         email: employee.email,
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
           id: employee.id,
           name: employee.fullName,
           email: employee.email,
-          role: "EMPLOYEE",
+          role: employee.role,
         },
       });
 

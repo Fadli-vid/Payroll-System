@@ -44,15 +44,15 @@ export function ConfirmDialog({
                 <AlertTriangle className="h-5 w-5 text-destructive" />
               </div>
             )}
-            <div>
+            <div className="min-w-0">
               <DialogTitle>{title}</DialogTitle>
-              <DialogDescription className="mt-1">
+              <DialogDescription className="mt-1 break-words">
                 {description}
               </DialogDescription>
             </div>
           </div>
         </DialogHeader>
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter>
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
@@ -64,6 +64,11 @@ export function ConfirmDialog({
             variant={variant}
             onClick={onConfirm}
             disabled={isLoading}
+            className={
+              variant === "destructive"
+                ? "bg-destructive text-white hover:bg-destructive/90"
+                : undefined
+            }
           >
             {isLoading ? "Memproses..." : confirmLabel}
           </Button>

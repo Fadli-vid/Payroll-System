@@ -1,22 +1,33 @@
 import { prisma } from "@/src/lib/prisma";
-import type {
-  Allowance,
-  Deduction,
-  PenaltySetting,
-  Attendance,
-} from "@/src/generated/prisma/client";
+import { Prisma } from "@/src/generated/prisma/client";
+import type { PenaltySetting, Attendance } from "@/src/generated/prisma/client";
+import {
+  MONTHLY_WORK_HOURS_DIVISOR,
+  DEFAULT_WORKING_DAYS_PER_MONTH,
+  OVERTIME_MULTIPLIER,
+} from "@/src/lib/constants";
 
 export interface PayrollCalculationOptions {
   month: number;
   year: number;
   bonus?: number;
   // Batch optimization caches (prevents N+1 database queries)
-  cachedEmployee?: any;
-  cachedMasterAllowances?: Allowance[];
-  cachedMasterDeductions?: Deduction[];
+  cachedEmployee?: EmployeeWithRelations;
+  // Berisi SEMUA aturan penalti (aktif & nonaktif), diurutkan minMinutes asc.
+  // Engine memfilter isActive sendiri (dibutuhkan untuk keputusan fallback).
   cachedPenaltySettings?: PenaltySetting[];
   cachedAttendances?: Attendance[];
 }
+
+type EmployeeWithRelations = Prisma.EmployeeGetPayload<{
+  include: {
+    position: true;
+    department: true;
+    employeeAllowances: { include: { allowance: true } };
+    employeeDeductions: { include: { deduction: true } };
+  };
+  omit: { password: true };
+}>;
 
 export interface PayrollCalculationResult {
   employeeId: string;
@@ -38,6 +49,12 @@ export interface PayrollCalculationResult {
 
 /**
  * Calculate payroll figures and detail items for a single employee in a given month and year.
+ *
+ * Tunjangan & potongan dihitung HANYA dari assignment junction table
+ * (EmployeeAllowance / EmployeeDeduction) dengan master yang masih aktif —
+ * karyawan baru otomatis ter-link ke semua master aktif saat dibuat, tetapi
+ * un-assign per karyawan kini benar-benar berpengaruh.
+ *
  * Supports batch optimization via cached data options to avoid N+1 database queries.
  */
 export async function calculateSingleEmployeePayroll(
@@ -71,8 +88,8 @@ export async function calculateSingleEmployeePayroll(
     return null;
   }
 
-  const basicSalary = Number(employee.baseSalary);
-  const hourlyRate = basicSalary / 173; // Standard hourly rate calculation
+  const basicSalary = Math.round(Number(employee.baseSalary));
+  const hourlyRate = basicSalary / MONTHLY_WORK_HOURS_DIVISOR;
 
   const details: {
     component: string;
@@ -89,18 +106,12 @@ export async function calculateSingleEmployeePayroll(
     description: `Gaji pokok posisi ${employee.position.name}`,
   });
 
-  // 3. Employee & Active Master Allowances (use batch cache if provided)
-  const activeMasterAllowances: Allowance[] =
-    options.cachedMasterAllowances ??
-    (await prisma.allowance.findMany({
-      where: { isActive: true },
-    }));
-
+  // 2. Allowances — position base allowance + assigned active allowances
   const appliedAllowanceIds = new Set<string>();
   let allowanceTotal = 0;
 
-  // 3a. Position Base Allowance
-  const positionAllowance = Number(employee.position.baseAllowance);
+  // 2a. Position Base Allowance
+  const positionAllowance = Math.round(Number(employee.position.baseAllowance));
   if (positionAllowance > 0) {
     allowanceTotal += positionAllowance;
     details.push({
@@ -111,14 +122,18 @@ export async function calculateSingleEmployeePayroll(
     });
   }
 
-  // 3b. Active Master Allowances
-  for (const allowance of activeMasterAllowances) {
+  // 2b. Assigned Allowances (junction table; only active masters apply)
+  for (const ea of employee.employeeAllowances) {
+    const allowance = ea.allowance;
+    if (!allowance || !allowance.isActive || appliedAllowanceIds.has(allowance.id)) {
+      continue;
+    }
     appliedAllowanceIds.add(allowance.id);
     const rawVal = Number(allowance.amount);
     const amt =
       allowance.type === "PERCENTAGE"
         ? Math.round(basicSalary * (rawVal / 100))
-        : rawVal;
+        : Math.round(rawVal);
     allowanceTotal += amt;
     details.push({
       component: allowance.name,
@@ -132,51 +147,21 @@ export async function calculateSingleEmployeePayroll(
     });
   }
 
-  // 3c. Additional Employee-Specific Allowances
-  for (const ea of employee.employeeAllowances) {
-    if (
-      ea.allowance &&
-      ea.allowance.isActive &&
-      !appliedAllowanceIds.has(ea.allowance.id)
-    ) {
-      appliedAllowanceIds.add(ea.allowance.id);
-      const rawVal = Number(ea.allowance.amount);
-      const amt =
-        ea.allowance.type === "PERCENTAGE"
-          ? Math.round(basicSalary * (rawVal / 100))
-          : rawVal;
-      allowanceTotal += amt;
-      details.push({
-        component: ea.allowance.name,
-        type: "EARNING",
-        amount: amt,
-        description:
-          ea.allowance.description ||
-          (ea.allowance.type === "PERCENTAGE"
-            ? `Tunjangan ${rawVal}% dari gaji pokok`
-            : "Tunjangan rutin"),
-      });
-    }
-  }
-
-  // 4. Employee & Active Master Deductions (use batch cache if provided)
-  const activeMasterDeductions: Deduction[] =
-    options.cachedMasterDeductions ??
-    (await prisma.deduction.findMany({
-      where: { isActive: true },
-    }));
-
+  // 3. Deductions — assigned active deductions (junction table)
   const appliedDeductionIds = new Set<string>();
   let deductionTotal = 0;
 
-  // 4a. Active Master Deductions
-  for (const deduction of activeMasterDeductions) {
+  for (const ed of employee.employeeDeductions) {
+    const deduction = ed.deduction;
+    if (!deduction || !deduction.isActive || appliedDeductionIds.has(deduction.id)) {
+      continue;
+    }
     appliedDeductionIds.add(deduction.id);
     const rawVal = Number(deduction.amount);
     const amt =
       deduction.type === "PERCENTAGE"
         ? Math.round(basicSalary * (rawVal / 100))
-        : rawVal;
+        : Math.round(rawVal);
     deductionTotal += amt;
     details.push({
       component: deduction.name,
@@ -190,34 +175,7 @@ export async function calculateSingleEmployeePayroll(
     });
   }
 
-  // 4b. Additional Employee-Specific Deductions
-  for (const ed of employee.employeeDeductions) {
-    if (
-      ed.deduction &&
-      ed.deduction.isActive &&
-      !appliedDeductionIds.has(ed.deduction.id)
-    ) {
-      appliedDeductionIds.add(ed.deduction.id);
-      const rawVal = Number(ed.deduction.amount);
-      const amt =
-        ed.deduction.type === "PERCENTAGE"
-          ? Math.round(basicSalary * (rawVal / 100))
-          : rawVal;
-      deductionTotal += amt;
-      details.push({
-        component: ed.deduction.name,
-        type: "DEDUCTION",
-        amount: amt,
-        description:
-          ed.deduction.description ||
-          (ed.deduction.type === "PERCENTAGE"
-            ? `Potongan ${rawVal}% dari gaji pokok`
-            : "Potongan rutin"),
-      });
-    }
-  }
-
-  // 5. Attendance calculations for month/year (use batch cache if provided)
+  // 4. Attendance calculations for month/year (use batch cache if provided)
   const startDate = new Date(Date.UTC(year, month - 1, 1));
   const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
 
@@ -238,57 +196,64 @@ export async function calculateSingleEmployeePayroll(
   let absentDays = 0;
 
   for (const att of attendances) {
-    totalOvertimeHours += Number(att.overtimeHours || 0);
-    totalLateMinutes += att.lateMinutes || 0;
+    // Lembur & keterlambatan hanya dihitung untuk hari benar-benar bekerja —
+    // record SICK/LEAVE/VACATION/ABSENT tidak menghasilkan lembur/denda telat.
+    if (att.status === "PRESENT" || att.status === "LATE") {
+      totalOvertimeHours += Number(att.overtimeHours || 0);
+      totalLateMinutes += att.lateMinutes || 0;
+    }
     if (att.status === "ABSENT") {
       absentDays += 1;
     }
   }
 
-  // Overtime Pay Calculation (1.5x hourly rate)
-  const overtimePay = Math.round(totalOvertimeHours * hourlyRate * 1.5);
+  // Overtime Pay Calculation (flat multiplier — see constants for limitation note)
+  const overtimePay = Math.round(
+    totalOvertimeHours * hourlyRate * OVERTIME_MULTIPLIER
+  );
   if (overtimePay > 0) {
     details.push({
       component: `Uang Lembur (${totalOvertimeHours} jam)`,
       type: "EARNING",
       amount: overtimePay,
-      description: `Perhitungan lembur: ${totalOvertimeHours} jam x 1.5x tarif per jam`,
+      description: `Perhitungan lembur: ${totalOvertimeHours} jam x ${OVERTIME_MULTIPLIER}x tarif per jam`,
     });
   }
 
-  // 6. Configurable Penalty Deductions (use batch cache if provided)
+  // 5. Configurable Penalty Deductions (use batch cache if provided)
   const penaltySettings: PenaltySetting[] =
     options.cachedPenaltySettings ??
     (await prisma.penaltySetting.findMany({
-      where: { isActive: true },
       orderBy: { minMinutes: "asc" },
     }));
 
-  const lateSettings = penaltySettings.filter((p) => p.type === "LATE");
-  const absentSettings = penaltySettings.filter((p) => p.type === "ABSENT");
+  const lateRulesAll = penaltySettings.filter((p) => p.type === "LATE");
+  const absentRulesAll = penaltySettings.filter((p) => p.type === "ABSENT");
+  const lateSettings = lateRulesAll.filter((p) => p.isActive);
+  const absentSettings = absentRulesAll.filter((p) => p.isActive);
 
-  // 6a. Late Penalty — apply per-record, matching lateMinutes to tier ranges
+  // 5a. Late Penalty — apply per-record, matching lateMinutes to tier ranges.
+  // Label memakai jumlah kejadian/menit yang BENAR-BENAR didenda saja.
   let totalLatePenalty = 0;
-  let lateOccurrences = 0;
+  let chargedLateOccurrences = 0;
+  let chargedLateMinutes = 0;
 
   for (const att of attendances) {
-    if (att.status === "LATE" && att.lateMinutes > 0) {
-      lateOccurrences++;
-      // Find matching tier
-      for (const tier of lateSettings) {
-        const min = tier.minMinutes;
-        const max = tier.maxMinutes ?? Infinity;
-        if (att.lateMinutes >= min && att.lateMinutes <= max) {
-          if (tier.mode === "FIXED") {
-            totalLatePenalty += Number(tier.value);
-          } else {
-            // PERCENTAGE of basic salary
-            totalLatePenalty += Math.round(
-              basicSalary * (Number(tier.value) / 100)
-            );
-          }
-          break; // Only one tier matches per record
+    if (att.status !== "LATE" || att.lateMinutes <= 0) continue;
+    for (const tier of lateSettings) {
+      const min = tier.minMinutes;
+      const max = tier.maxMinutes ?? Infinity;
+      if (att.lateMinutes >= min && att.lateMinutes <= max) {
+        const amt =
+          tier.mode === "FIXED"
+            ? Math.round(Number(tier.value))
+            : Math.round(basicSalary * (Number(tier.value) / 100));
+        if (amt > 0) {
+          totalLatePenalty += amt;
+          chargedLateOccurrences++;
+          chargedLateMinutes += att.lateMinutes;
         }
+        break; // Only one tier matches per record
       }
     }
   }
@@ -296,13 +261,14 @@ export async function calculateSingleEmployeePayroll(
   if (totalLatePenalty > 0) {
     deductionTotal += totalLatePenalty;
     details.push({
-      component: `Penalti Keterlambatan (${lateOccurrences}x, ${totalLateMinutes} menit)`,
+      component: `Penalti Keterlambatan (${chargedLateOccurrences}x, ${chargedLateMinutes} menit)`,
       type: "DEDUCTION",
       amount: totalLatePenalty,
-      description: `Denda keterlambatan ${lateOccurrences} kejadian, total ${totalLateMinutes} menit`,
+      description: `Denda keterlambatan ${chargedLateOccurrences} kejadian, total ${chargedLateMinutes} menit`,
     });
-  } else if (lateSettings.length === 0 && totalLateMinutes > 0) {
-    // Fallback: no penalty settings configured — use legacy formula
+  } else if (lateRulesAll.length === 0 && totalLateMinutes > 0) {
+    // Fallback legacy hanya bila TIDAK ADA aturan LATE sama sekali di tabel.
+    // Aturan ada tapi semua nonaktif = penalti dimatikan secara eksplisit.
     const legacyLatePenalty = Math.round(totalLateMinutes * (hourlyRate / 60));
     if (legacyLatePenalty > 0) {
       deductionTotal += legacyLatePenalty;
@@ -315,7 +281,7 @@ export async function calculateSingleEmployeePayroll(
     }
   }
 
-  // 6b. Absent Penalty — apply per-day of unexcused absence
+  // 5b. Absent Penalty — apply per-day of unexcused absence
   let totalAbsentPenalty = 0;
 
   if (absentDays > 0 && absentSettings.length > 0) {
@@ -329,9 +295,11 @@ export async function calculateSingleEmployeePayroll(
         basicSalary * (Number(absentRule.value) / 100) * absentDays
       );
     }
-  } else if (absentSettings.length === 0 && absentDays > 0) {
-    // Fallback: no penalty settings configured — use legacy formula
-    totalAbsentPenalty = Math.round(absentDays * (basicSalary / 22));
+  } else if (absentRulesAll.length === 0 && absentDays > 0) {
+    // Fallback legacy hanya bila TIDAK ADA aturan ABSENT sama sekali di tabel.
+    totalAbsentPenalty = Math.round(
+      absentDays * (basicSalary / DEFAULT_WORKING_DAYS_PER_MONTH)
+    );
   }
 
   if (totalAbsentPenalty > 0) {
@@ -345,20 +313,31 @@ export async function calculateSingleEmployeePayroll(
   }
 
   // Bonus
-  if (bonus > 0) {
+  const roundedBonus = Math.round(bonus);
+  if (roundedBonus > 0) {
     details.push({
       component: "Bonus / Insentif",
       type: "EARNING",
-      amount: bonus,
+      amount: roundedBonus,
       description: "Bonus / insentif tambahan",
     });
   }
 
-  // Net Salary Calculation
-  const netSalary = Math.max(
-    0,
-    basicSalary + allowanceTotal + overtimePay + bonus - deductionTotal
-  );
+  // Net Salary Calculation — clamped at 0; bila potongan melebihi penerimaan,
+  // tambahkan baris penyesuaian agar rincian slip tetap rekonsiliasi dengan net.
+  const rawNet =
+    basicSalary + allowanceTotal + overtimePay + roundedBonus - deductionTotal;
+  const netSalary = Math.max(0, Math.round(rawNet));
+
+  if (rawNet < 0) {
+    details.push({
+      component: "Penyesuaian Gaji Minimum",
+      type: "EARNING",
+      amount: Math.round(-rawNet),
+      description:
+        "Total potongan melebihi total penerimaan; gaji bersih ditetapkan Rp 0 (kelebihan potongan tidak ditagihkan).",
+    });
+  }
 
   return {
     employeeId,
@@ -368,7 +347,7 @@ export async function calculateSingleEmployeePayroll(
     allowanceTotal,
     deductionTotal,
     overtimePay,
-    bonus,
+    bonus: roundedBonus,
     netSalary,
     details,
   };
@@ -422,22 +401,35 @@ export async function savePayrollRecord(
       });
       payrollId = updated.id;
     } else {
-      // Create new payroll
-      const created = await tx.payroll.create({
-        data: {
-          employeeId: calc.employeeId,
-          month: calc.month,
-          year: calc.year,
-          basicSalary: calc.basicSalary,
-          allowanceTotal: calc.allowanceTotal,
-          deductionTotal: calc.deductionTotal,
-          overtimePay: calc.overtimePay,
-          bonus: calc.bonus,
-          netSalary: calc.netSalary,
-          status: "DRAFT",
-        },
-      });
-      payrollId = created.id;
+      // Create new payroll — race dua proses generate bersamaan ditangkap
+      // lewat unique constraint (employeeId, month, year).
+      try {
+        const created = await tx.payroll.create({
+          data: {
+            employeeId: calc.employeeId,
+            month: calc.month,
+            year: calc.year,
+            basicSalary: calc.basicSalary,
+            allowanceTotal: calc.allowanceTotal,
+            deductionTotal: calc.deductionTotal,
+            overtimePay: calc.overtimePay,
+            bonus: calc.bonus,
+            netSalary: calc.netSalary,
+            status: "DRAFT",
+          },
+        });
+        payrollId = created.id;
+      } catch (e) {
+        if (
+          e instanceof Prisma.PrismaClientKnownRequestError &&
+          e.code === "P2002"
+        ) {
+          throw new Error(
+            `Gaji ${calc.month}/${calc.year} sedang diproses oleh permintaan lain. Silakan coba lagi.`
+          );
+        }
+        throw e;
+      }
     }
 
     // Insert new payroll details
@@ -502,26 +494,22 @@ export async function generateBatchPayroll(
     };
   }
 
-  // 2. Pre-fetch master data and all attendances for the entire batch concurrently in 1 Promise.all
+  // 2. Pre-fetch penalty settings and all attendances for the entire batch concurrently
   const startDate = new Date(Date.UTC(year, month - 1, 1));
   const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
   const employeeIds = activeEmployees.map((e) => e.id);
 
-  const [masterAllowances, masterDeductions, penaltySettings, allAttendances] =
-    await Promise.all([
-      prisma.allowance.findMany({ where: { isActive: true } }),
-      prisma.deduction.findMany({ where: { isActive: true } }),
-      prisma.penaltySetting.findMany({
-        where: { isActive: true },
-        orderBy: { minMinutes: "asc" },
-      }),
-      prisma.attendance.findMany({
-        where: {
-          employeeId: { in: employeeIds },
-          date: { gte: startDate, lte: endDate },
-        },
-      }),
-    ]);
+  const [penaltySettings, allAttendances] = await Promise.all([
+    prisma.penaltySetting.findMany({
+      orderBy: { minMinutes: "asc" },
+    }),
+    prisma.attendance.findMany({
+      where: {
+        employeeId: { in: employeeIds },
+        date: { gte: startDate, lte: endDate },
+      },
+    }),
+  ]);
 
   // Group attendances by employeeId for O(1) in-memory lookup
   const attendanceMap = new Map<string, typeof allAttendances>();
@@ -545,8 +533,6 @@ export async function generateBatchPayroll(
         year,
         bonus: bonus || 0,
         cachedEmployee: emp,
-        cachedMasterAllowances: masterAllowances,
-        cachedMasterDeductions: masterDeductions,
         cachedPenaltySettings: penaltySettings,
         cachedAttendances: attendanceMap.get(emp.id) || [],
       });

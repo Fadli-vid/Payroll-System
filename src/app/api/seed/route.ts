@@ -1,8 +1,11 @@
-import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
 import { prisma } from "@/src/lib/prisma";
+import { requireAdmin } from "@/src/lib/authz";
+import { successResponse, errorResponse } from "@/src/utils/api-response";
 
 /**
- * GET /api/seed — Seed database with CSV dataset from Payroll Case Study
+ * POST /api/seed — Seed database with CSV dataset from Payroll Case Study
+ * Admin-only; disabled in production unless ALLOW_SEED=true.
  *
  * Dataset mapping (CSV → Prisma Schema):
  *
@@ -41,8 +44,15 @@ import { prisma } from "@/src/lib/prisma";
  *   - Employee.address → generated: fiktif Jakarta
  */
 
-export async function GET() {
+export async function POST() {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
+    if (process.env.NODE_ENV === "production" && process.env.ALLOW_SEED !== "true") {
+      return errorResponse("Seeding dinonaktifkan di production", 403);
+    }
+
     console.log("🌱 Seeding database with CSV dataset...");
 
     // ═══════════════════════════════════════════════════════
@@ -262,6 +272,7 @@ export async function GET() {
     ];
 
     const createdEmployees: { id: string; data: EmpData }[] = [];
+    const defaultPasswordHash = await bcrypt.hash("123456", 10);
 
     for (const emp of employeesData) {
       const created = await prisma.employee.create({
@@ -274,6 +285,7 @@ export async function GET() {
           hireDate: new Date("2018-01-02"),
           status: "ACTIVE",
           baseSalary: emp.baseSalary,
+          password: defaultPasswordHash,
           departmentId: emp.departmentId,
           positionId: emp.positionId,
         },
@@ -383,15 +395,16 @@ export async function GET() {
           status = "PRESENT"; // Holiday but still worked = lembur
         }
 
+        // Wall-clock time disimpan UTC-anchored (konsisten dengan API attendance)
         let checkInDT: Date | null = null;
         let checkOutDT: Date | null = null;
         if (day.checkIn) {
           const [h, m] = day.checkIn.split(":").map(Number);
-          checkInDT = new Date(2018, 6, day.day, h, m, 0);
+          checkInDT = new Date(Date.UTC(2018, 6, day.day, h, m, 0));
         }
         if (day.checkOut) {
           const [h, m] = day.checkOut.split(":").map(Number);
-          checkOutDT = new Date(2018, 6, day.day, h, m, 0);
+          checkOutDT = new Date(Date.UTC(2018, 6, day.day, h, m, 0));
         }
 
         await prisma.attendance.create({
@@ -502,16 +515,12 @@ export async function GET() {
 
     console.log("✅ Seeding complete!", summary);
 
-    return NextResponse.json({
-      success: true,
+    return successResponse({
       message: "Migrasi dataset CSV ke database berhasil!",
       summary,
     });
   } catch (error) {
     console.error("❌ Seeding error:", error);
-    return NextResponse.json(
-      { success: false, message: "Gagal migrasi dataset", error: String(error) },
-      { status: 500 }
-    );
+    return errorResponse("Gagal migrasi dataset", 500);
   }
 }

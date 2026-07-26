@@ -3,6 +3,8 @@
 
 Dokumen ini berisi panduan lengkap dan rinci mengenai rancangan basis data (*database schema*) pada **Sistem Penggajian** ini. Database menggunakan **PostgreSQL** dengan ORM **Prisma**.
 
+> Sumber kebenaran skema adalah file [`prisma/schema.prisma`](../prisma/schema.prisma) — bila dokumen ini dan file tersebut berbeda, ikuti file schema. Dokumen terkait: [PAYROLL_SYSTEM_GUIDE.md](PAYROLL_SYSTEM_GUIDE.md) (alur bisnis & rumus) dan [STRUCTURE_GUIDE.md](STRUCTURE_GUIDE.md) (peta struktur folder & file kode).
+
 ---
 
 ## 📌 Ringkasan Konvensi Umum Database
@@ -62,6 +64,13 @@ Kategori metode kalkulasi denda penalti:
 - `FIXED`: Denda bernilai nominal tetap (dalam Rupiah).
 - `PERCENTAGE`: Denda berbasis persentase (%) dari gaji pokok karyawan.
 
+### 9. `UserRole`
+Menyatakan peran (role) login pengguna pada kolom `Employee.role`:
+- `ADMIN`: Akses penuh ke seluruh halaman & API admin.
+- `EMPLOYEE`: Hanya dapat mengakses portal karyawan (kehadiran, slip gaji, dan profil miliknya sendiri).
+
+> Catatan: akun admin utama TIDAK disimpan di tabel `employees` — kredensialnya berasal dari environment variable `ADMIN_ID`/`ADMIN_PASSWORD`. Kolom `role` dipakai bila sebuah akun karyawan diberi peran admin.
+
 ---
 
 ## 🗄️ Detail Model & Tabel Database
@@ -115,6 +124,8 @@ Tabel utama master data karyawan/pegawai perusahaan.
 | `hireDate` | `DateTime` | - | Tanggal resmi karyawan mulai bekerja. |
 | `status` | `EmploymentStatus` | `@default(ACTIVE)` | Status kepegawaian (ACTIVE, INACTIVE, RESIGNED, TERMINATED). |
 | `baseSalary` | `Decimal` | `Decimal(15,2)` | Gaji pokok per bulan. |
+| `password` | `String` | - | **Hash bcrypt** password login portal karyawan (tidak pernah plaintext; di-omit global dari seluruh response API). |
+| `role` | `UserRole` | `@default(EMPLOYEE)` | Role login (`ADMIN` / `EMPLOYEE`) — dibaca ke payload sesi saat login. |
 | `departmentId` | `String` | Foreign Key, `@index` | ID referensi ke departemen tempat bekerja. |
 | `positionId` | `String` | Foreign Key, `@index` | ID referensi ke jabatan karyawan. |
 | `createdAt` | `DateTime` | `@default(now())` | Waktu data dibuat. |
@@ -137,10 +148,10 @@ Mencatat presensi harian karyawan, termasuk jam masuk/keluar dan kalkulasi keter
 | :--- | :--- | :--- | :--- |
 | `id` | `String` | `@id`, `@default(uuid())` | Primary key unik presensi. |
 | `employeeId` | `String` | Foreign Key, `@index` | ID karyawan pemilik presensi. |
-| `date` | `DateTime` | `@db.Date` | Tanggal presensi (hanya bagian tanggal). |
+| `date` | `DateTime` | `@db.Date` | Tanggal presensi (hanya bagian tanggal, UTC midnight). |
 | `status` | `AttendanceStatus` | `@default(PRESENT)` | Status kehadiran (PRESENT, LATE, SICK, dll). |
-| `checkIn` | `DateTime?` | Optional | Waktu persis jam masuk kerja. |
-| `checkOut` | `DateTime?` | Optional | Waktu persis jam pulang kerja. |
+| `checkIn` | `DateTime?` | Optional | Jam masuk sebagai **wall-clock UTC-anchored** (`...T08:00:00Z` = jam 08:00). Klien wajib merender dengan getter UTC. |
+| `checkOut` | `DateTime?` | Optional | Jam pulang, konvensi sama dengan `checkIn`. |
 | `lateMinutes` | `Int` | `@default(0)` | Jumlah durasi keterlambatan dalam menit. |
 | `overtimeHours` | `Decimal` | `@default(0)`, `Decimal(5,2)` | Durasi jam kerja lembur pada hari tersebut. |
 | `workingHours` | `Decimal` | `@default(0)`, `Decimal(5,2)` | Total jam kerja efektif pada hari tersebut. |
@@ -150,6 +161,8 @@ Mencatat presensi harian karyawan, termasuk jam masuk/keluar dan kalkulasi keter
 
 **Constraints Khusus**:
 - `@@unique([employeeId, date])`: Seorang karyawan hanya boleh memiliki 1 record presensi per tanggal.
+- `@@index([date])`: Mempercepat query rentang tanggal lintas karyawan (laporan bulanan).
+- Perubahan data kehadiran **ditolak (409)** bila payroll karyawan untuk periode tanggal tersebut sudah berstatus `APPROVED`/`PAID`.
 
 ---
 
@@ -186,7 +199,7 @@ Master data jenis-jenis potongan gaji bulanan (misal: BPJS Kesehatan, BPJS Keten
 ---
 
 ### 7. Model `EmployeeAllowance` ➔ Tabel `employee_allowances`
-Tabel penghubung (*junction table / Many-to-Many*) untuk memetakan tunjangan mana saja yang berhak diterima oleh karyawan tertentu.
+Tabel penghubung (*junction table / Many-to-Many*) untuk memetakan tunjangan mana saja yang berhak diterima oleh karyawan tertentu. **Tabel ini adalah sumber otoritatif perhitungan payroll** — engine hanya membayarkan tunjangan yang ter-assign di sini (dan masternya masih aktif).
 
 | Nama Kolom | Tipe Data | Constraints / Default | Deskripsi & Fungsi |
 | :--- | :--- | :--- | :--- |
@@ -202,7 +215,7 @@ Tabel penghubung (*junction table / Many-to-Many*) untuk memetakan tunjangan man
 ---
 
 ### 8. Model `EmployeeDeduction` ➔ Tabel `employee_deductions`
-Tabel penghubung (*junction table / Many-to-Many*) untuk memetakan potongan mana saja yang dikenakan pada karyawan tertentu.
+Tabel penghubung (*junction table / Many-to-Many*) untuk memetakan potongan mana saja yang dikenakan pada karyawan tertentu. **Tabel ini adalah sumber otoritatif perhitungan payroll** — engine hanya memotong potongan yang ter-assign di sini (dan masternya masih aktif).
 
 | Nama Kolom | Tipe Data | Constraints / Default | Deskripsi & Fungsi |
 | :--- | :--- | :--- | :--- |
@@ -231,10 +244,12 @@ Header kalkulasi penggajian bulanan untuk tiap karyawan pada periode tertentu.
 | `deductionTotal`| `Decimal` | `@default(0)`, `Decimal(15,2)` | Akumulasi total seluruh potongan. |
 | `overtimePay` | `Decimal` | `@default(0)`, `Decimal(15,2)` | Total uang lembur yang didapat pada periode ini. |
 | `bonus` | `Decimal` | `@default(0)`, `Decimal(15,2)` | Bonus insentif/tambahan jika ada. |
-| `netSalary` | `Decimal` | `Decimal(15,2)` | Gaji bersih (*take-home pay*): `(basicSalary + allowanceTotal + overtimePay + bonus) - deductionTotal`. |
-| `status` | `PayrollStatus` | `@default(DRAFT)` | Status siklus slip gaji (DRAFT, APPROVED, PAID). |
+| `netSalary` | `Decimal` | `Decimal(15,2)` | Gaji bersih (*take-home pay*): `max(0, (basicSalary + allowanceTotal + overtimePay + bonus) - deductionTotal)` — di-clamp ke 0 dengan baris detail "Penyesuaian Gaji Minimum" bila potongan melebihi penerimaan. |
+| `status` | `PayrollStatus` | `@default(DRAFT)` | Status siklus slip gaji. Transisi divalidasi: DRAFT→APPROVED, APPROVED→PAID, APPROVED→DRAFT; PAID final. |
+| `approvedAt` | `DateTime?` | Optional | Waktu slip disetujui (di-null-kan bila dikembalikan ke DRAFT). |
+| `paidAt` | `DateTime?` | Optional | Waktu slip ditandai dibayar. |
 | `createdAt` | `DateTime` | `@default(now())` | Waktu slip dibuat. |
-| `updatedAt` | `DateTime` | `@updatedAt` | Waktu slip diperbarui. |
+| `updatedAt` | `DateTime` | `@updatedAt` | Waktu slip diperbarui — juga dipakai sebagai pembanding staleness terhadap `Attendance.updatedAt`. |
 
 **Constraints Khusus**:
 - `@@unique([employeeId, month, year])`: Hanya boleh ada 1 slip penggajian per karyawan dalam 1 periode bulan dan tahun.
@@ -259,6 +274,8 @@ Detail item rincian gaji (breakdown) yang membentuk sebuah record `Payroll`. Men
 
 ### 11. Model `PenaltySetting` ➔ Tabel `penalty_settings`
 Mengelola aturan dan pengaturan penalti/denda presensi karyawan untuk keterlambatan bertingkat (tier) dan ketidakhadiran (alpa), terpisah dari master potongan bulanan.
+
+**Semantik fallback**: formula default (legacy) hanya dipakai bila **tidak ada satu pun baris** untuk tipe tersebut di tabel ini. Bila baris ada tetapi semuanya `isActive = false`, penalti tipe tersebut dianggap dimatikan (tanpa denda). Validasi API memastikan rentang tier LATE aktif tidak saling tumpang tindih.
 
 | Nama Kolom | Tipe Data | Constraints / Default | Deskripsi & Fungsi |
 | :--- | :--- | :--- | :--- |
@@ -294,9 +311,9 @@ erDiagram
     Deduction ||--o{ EmployeeDeduction : "dialokasikan ke"
     
     Payroll ||--o{ PayrollDetail : "memiliki rincian item"
-    
-    PenaltySetting }|--|| Payroll : "digunakan dalam kalkulasi penalti"
 ```
+
+> **Catatan tentang `PenaltySetting`:** tabel ini berdiri sendiri (tidak punya foreign key ke tabel mana pun). Hubungannya dengan `Payroll` bersifat *konseptual*: saat generate gaji, engine membaca aturan penalti dari tabel ini untuk menghitung denda keterlambatan/alpa, lalu hasilnya ditulis sebagai baris `PayrollDetail` bertipe `DEDUCTION`.
 
 ---
 
@@ -307,12 +324,12 @@ erDiagram
    - Jenis-jenis Tunjangan (`Allowance`) dan Potongan (`Deduction`) didaftarkan dengan menentukan apakah nilainya berupa **Nominal Tetap (FIXED)** atau **Persentase Gaji (PERCENTAGE)**.
    - Aturan Denda Presensi (`PenaltySetting`) dikonfigurasi untuk menentukan tier denda keterlambatan (menit min/max) dan denda alpa tanpa izin.
 2. **Pengelolaan Karyawan (`Employee`)**:
-   - Karyawan didaftarkan dengan menetapkan Gaji Pokok (`baseSalary`), Departemen, dan Jabatan.
-   - Tunjangan rutin dan Potongan rutin dikaitkan ke karyawan melalui tabel `EmployeeAllowance` dan `EmployeeDeduction` (serta otomatis mengaplikasikan potongan/tunjangan master aktif).
+   - Karyawan didaftarkan dengan menetapkan Gaji Pokok (`baseSalary`), Departemen, dan Jabatan; password awal di-hash bcrypt.
+   - Tunjangan dan Potongan dikaitkan per-karyawan melalui `EmployeeAllowance`/`EmployeeDeduction` — default karyawan baru otomatis ter-link ke semua master aktif, dan admin dapat memilih/melepas assignment lewat dialog edit karyawan. Engine payroll HANYA membaca junction ini.
 3. **Presensi Harian & Absensi Massal (`Attendance`)**:
    - Setiap hari kerja, sistem mencatat presensi harian atau input absensi massal (`checkIn`, `checkOut`), menghitung `lateMinutes` dan `overtimeHours` secara otomatis.
 4. **Pemrosesan Gaji Bulanan (`Payroll` & `PayrollDetail`)**:
-   - Di akhir bulan, sistem menjalankan *Generate Batch Payroll* dengan **optimasi bulk pre-fetch query**.
-   - Sistem mencocokkan record kehadiran dengan `PenaltySetting` untuk menghitung denda keterlambatan dan alpa secara otomatis.
+   - Di akhir bulan, sistem menjalankan *Generate Batch Payroll* dengan **optimasi bulk pre-fetch query** (tanpa fan-out master — tunjangan/potongan dibaca dari junction per-karyawan).
+   - Sistem mencocokkan record kehadiran `PRESENT`/`LATE` dengan `PenaltySetting` untuk menghitung lembur serta denda keterlambatan, dan record `ABSENT` untuk denda alpa.
    - Rincian penerimaan dan potongan di-generate ke dalam `PayrollDetail` (tipe `EARNING` untuk tunjangan/lembur/bonus dan `DEDUCTION` untuk potongan rutin & penalti).
-   - Setelah diperiksa, status diubah menjadi `APPROVED` lalu `PAID` saat pengiriman gaji diselesaikan.
+   - Setelah diperiksa, status diubah menjadi `APPROVED` lalu `PAID` (transisi divalidasi; PAID final). Angka uang di dashboard & laporan hanya menghitung payroll `APPROVED`/`PAID` — DRAFT dilaporkan sebagai jumlah terpisah.

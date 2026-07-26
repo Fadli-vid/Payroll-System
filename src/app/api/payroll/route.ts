@@ -1,42 +1,66 @@
 import { NextRequest } from "next/server";
+import { requireAdmin } from "@/src/lib/authz";
 import { prisma } from "@/src/lib/prisma";
-import { successResponse, errorResponse } from "@/src/utils/api-response";
+import {
+  successResponse,
+  errorResponse,
+  parseListParams,
+} from "@/src/utils/api-response";
+import type { Prisma } from "@/src/generated/prisma/client";
 
-type PayrollStatus = "DRAFT" | "APPROVED" | "PAID";
+const PAYROLL_STATUSES = ["DRAFT", "APPROVED", "PAID"] as const;
+type PayrollStatus = (typeof PAYROLL_STATUSES)[number];
+
+function parsePeriodParam(
+  raw: string | null,
+  min: number,
+  max: number
+): number | undefined | null {
+  if (!raw) return undefined;
+  const value = parseInt(raw, 10);
+  if (!Number.isFinite(value) || value < min || value > max) return null;
+  return value;
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const page = parseInt(searchParams.get("page") || "1", 10);
-    const pageSize = parseInt(searchParams.get("pageSize") || "10", 10);
-    const search = searchParams.get("search") || "";
-    const month = searchParams.get("month") ? parseInt(searchParams.get("month")!, 10) : undefined;
-    const year = searchParams.get("year") ? parseInt(searchParams.get("year")!, 10) : undefined;
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
+    const url = new URL(req.url);
+    const { page, pageSize, search, skip } = parseListParams(url);
+    const { searchParams } = url;
+
+    const month = parsePeriodParam(searchParams.get("month"), 1, 12);
+    const year = parsePeriodParam(searchParams.get("year"), 2000, 2100);
+    if (month === null || year === null) {
+      return errorResponse("Parameter bulan/tahun tidak valid", 422);
+    }
+
     const departmentId = searchParams.get("departmentId") || undefined;
-    const status = searchParams.get("status") as PayrollStatus | undefined;
+    const statusParam = searchParams.get("status") || undefined;
+    const status = PAYROLL_STATUSES.includes(statusParam as PayrollStatus)
+      ? (statusParam as PayrollStatus)
+      : undefined;
 
-    const skip = (page - 1) * pageSize;
-
-    const where: any = {};
+    const where: Prisma.PayrollWhereInput = {};
 
     if (month) where.month = month;
     if (year) where.year = year;
-    if (status && (status as string) !== "ALL") where.status = status;
+    if (status) where.status = status;
 
+    const employeeFilter: Prisma.EmployeeWhereInput = {};
     if (departmentId && departmentId !== "all") {
-      where.employee = {
-        departmentId: departmentId,
-      };
+      employeeFilter.departmentId = departmentId;
     }
-
     if (search) {
-      where.employee = {
-        ...where.employee,
-        OR: [
-          { fullName: { contains: search, mode: "insensitive" } },
-          { code: { contains: search, mode: "insensitive" } },
-        ],
-      };
+      employeeFilter.OR = [
+        { fullName: { contains: search, mode: "insensitive" } },
+        { code: { contains: search, mode: "insensitive" } },
+      ];
+    }
+    if (Object.keys(employeeFilter).length > 0) {
+      where.employee = employeeFilter;
     }
 
     const [total, payrolls] = await Promise.all([

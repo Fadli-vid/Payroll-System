@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { useTheme } from "next-themes";
 import {
-  Bell,
   Menu,
-  CircleDollarSign,
+  Moon,
+  Sun,
   LogOut,
   ChevronDown,
   ShieldCheck,
@@ -22,27 +23,8 @@ import {
 } from "@/src/components/ui/dropdown-menu";
 import { Badge } from "@/src/components/ui/badge";
 import { toast } from "sonner";
-
-const pageTitles: Record<string, string> = {
-  "/": "Dashboard",
-  "/employees": "Karyawan",
-  "/departments": "Departemen",
-  "/positions": "Jabatan",
-  "/attendance": "Kehadiran Admin",
-  "/allowances": "Tunjangan",
-  "/deductions": "Potongan & Penalti",
-  "/payroll": "Penggajian Batch",
-  "/reports": "Laporan",
-  "/employee/attendance": "Kehadiran Saya (Kalender)",
-  "/employee/payslips": "Slip Gaji Saya",
-  "/employee/profile": "Profil Saya",
-};
-
-interface UserSessionInfo {
-  name: string;
-  email: string;
-  role: "ADMIN" | "EMPLOYEE";
-}
+import { useSession } from "@/src/components/providers/session-provider";
+import { pageTitleFor } from "@/src/lib/navigation";
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -51,33 +33,22 @@ interface HeaderProps {
 export function Header({ onMenuClick }: HeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const { user, isLoading: isSessionLoading } = useSession();
+  const { resolvedTheme, setTheme } = useTheme();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [userInfo, setUserInfo] = useState<UserSessionInfo | null>(null);
+  // SSR-safe "mounted" flag (hindari hydration mismatch untuk ikon tema)
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  );
 
-  // Exact page title lookup
-  const title =
-    Object.entries(pageTitles).find(([path]) =>
-      path === "/" ? pathname === "/" : pathname === path || pathname.startsWith(path + "/")
-    )?.[1] ?? "Halaman";
+  const title = pageTitleFor(pathname);
 
-  // Check if current URL is under employee portal (/employee/...)
-  const isEmployeeRoute = pathname.startsWith("/employee/") || pathname === "/employee";
-
-  useEffect(() => {
-    // Fetch actual logged in user session from server
-    fetch("/api/auth/me")
-      .then((res) => res.json())
-      .then((res) => {
-        if (res.success && res.data) {
-          setUserInfo({
-            name: res.data.name,
-            email: res.data.email,
-            role: res.data.role,
-          });
-        }
-      })
-      .catch(() => {});
-  }, [pathname]);
+  // Fallback heuristik saat sesi masih dimuat (hindari flash role yang salah)
+  const isEmployeeRoute =
+    pathname.startsWith("/employee/") || pathname === "/employee";
+  const currentRole = user?.role || (isEmployeeRoute ? "EMPLOYEE" : "ADMIN");
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -93,10 +64,11 @@ export function Header({ onMenuClick }: HeaderProps) {
     }
   };
 
-  const currentRole = userInfo?.role || (isEmployeeRoute ? "EMPLOYEE" : "ADMIN");
+  const displayName = user?.name || (isSessionLoading ? "…" : "Pengguna");
+  const displayEmail = user?.email || "";
 
   return (
-    <header className="flex h-16 items-center gap-4 border-b border-border bg-card px-4 lg:px-6">
+    <header className="flex h-16 items-center gap-4 border-b border-border bg-card px-4 lg:px-6 print:hidden">
       {/* Mobile menu button */}
       <Button
         variant="ghost"
@@ -108,18 +80,13 @@ export function Header({ onMenuClick }: HeaderProps) {
         <span className="sr-only">Buka menu</span>
       </Button>
 
-      {/* Mobile logo */}
-      <div className="flex items-center gap-2 lg:hidden">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <CircleDollarSign className="h-4 w-4" />
-        </div>
-        <span className="text-sm font-bold">PayrollSys</span>
-      </div>
-
       {/* Page title & Role badge */}
-      <div className="hidden lg:flex items-center gap-3">
-        <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
-        <Badge variant={currentRole === "EMPLOYEE" ? "secondary" : "default"} className="text-xs">
+      <div className="flex min-w-0 items-center gap-3">
+        <h1 className="truncate text-base font-semibold tracking-tight lg:text-lg">{title}</h1>
+        <Badge
+          variant={currentRole === "EMPLOYEE" ? "secondary" : "default"}
+          className="text-xs hidden lg:inline-flex"
+        >
           {currentRole === "EMPLOYEE" ? "Role: Karyawan" : "Role: Admin"}
         </Badge>
       </div>
@@ -127,25 +94,36 @@ export function Header({ onMenuClick }: HeaderProps) {
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Notifications */}
-      <Button variant="ghost" size="icon" className="relative">
-        <Bell className="h-5 w-5 text-muted-foreground" />
-        <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary" />
-        <span className="sr-only">Notifikasi</span>
-      </Button>
+      {/* Theme toggle */}
+      {mounted && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+          aria-label={
+            resolvedTheme === "dark" ? "Ganti ke mode terang" : "Ganti ke mode gelap"
+          }
+        >
+          {resolvedTheme === "dark" ? (
+            <Sun className="h-5 w-5 text-muted-foreground" />
+          ) : (
+            <Moon className="h-5 w-5 text-muted-foreground" />
+          )}
+        </Button>
+      )}
 
       {/* User avatar & dropdown menu */}
       <DropdownMenu>
         <DropdownMenuTrigger className="flex items-center gap-2 p-1.5 hover:bg-accent rounded-full sm:rounded-lg transition-colors cursor-pointer outline-none">
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-semibold">
-            {userInfo?.name ? userInfo.name.charAt(0).toUpperCase() : "U"}
+            {user?.name ? user.name.charAt(0).toUpperCase() : "?"}
           </div>
           <div className="hidden sm:flex flex-col text-left">
             <span className="text-sm font-medium leading-none truncate max-w-[140px]">
-              {userInfo?.name || "Pengguna"}
+              {displayName}
             </span>
             <span className="text-xs text-muted-foreground truncate max-w-[140px]">
-              {userInfo?.email || (currentRole === "EMPLOYEE" ? "Karyawan" : "admin@payroll.com")}
+              {displayEmail}
             </span>
           </div>
           <ChevronDown className="h-4 w-4 text-muted-foreground hidden sm:block" />
@@ -159,9 +137,9 @@ export function Header({ onMenuClick }: HeaderProps) {
               <ShieldCheck className="h-4 w-4 text-primary" />
             )}
             <div className="flex flex-col overflow-hidden">
-              <span className="text-sm font-medium truncate">{userInfo?.name || "Pengguna"}</span>
+              <span className="text-sm font-medium truncate">{displayName}</span>
               <span className="text-xs font-normal text-muted-foreground truncate">
-                {userInfo?.email || (currentRole === "EMPLOYEE" ? "Karyawan" : "admin@payroll.com")}
+                {displayEmail}
               </span>
             </div>
           </DropdownMenuLabel>

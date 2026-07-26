@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/src/lib/prisma";
 import { getCurrentUser } from "@/src/lib/auth";
+import { periodSchema } from "@/src/types";
 import { successResponse, errorResponse } from "@/src/utils/api-response";
 
 /**
@@ -15,12 +16,15 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const monthStr = searchParams.get("month");
-    const yearStr = searchParams.get("year");
-
     const today = new Date();
-    const month = monthStr ? parseInt(monthStr, 10) : today.getMonth() + 1;
-    const year = yearStr ? parseInt(yearStr, 10) : today.getFullYear();
+    const parsed = periodSchema.safeParse({
+      month: searchParams.get("month") ?? today.getMonth() + 1,
+      year: searchParams.get("year") ?? today.getFullYear(),
+    });
+    if (!parsed.success) {
+      return errorResponse("Parameter bulan/tahun tidak valid", 422);
+    }
+    const { month, year } = parsed.data;
 
     const startDate = new Date(Date.UTC(year, month - 1, 1));
     const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
@@ -56,7 +60,10 @@ export async function GET(request: NextRequest) {
       if (r.status === "SICK") sickCount++;
       if (r.status === "VACATION") vacationCount++;
       if (r.status === "ABSENT") absentCount++;
-      totalOvertimeHours += Number(r.overtimeHours || 0);
+      // Konsisten dengan payroll engine: lembur hanya dari hari kerja nyata
+      if (r.status === "PRESENT" || r.status === "LATE") {
+        totalOvertimeHours += Number(r.overtimeHours || 0);
+      }
     }
 
     return successResponse({

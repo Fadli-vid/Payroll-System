@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { requireAdmin } from "@/src/lib/authz";
 import { prisma } from "@/src/lib/prisma";
 import { attendanceSchema } from "@/src/types";
 import {
@@ -8,83 +9,22 @@ import {
   parseListParams,
 } from "@/src/utils/api-response";
 import {
-  WORKING_HOURS,
-  LATE_RULES,
-  LATE_ABSENT_THRESHOLD,
-} from "@/src/lib/constants";
-
-/**
- * Parse a time string "HH:mm" into total minutes since midnight.
- */
-function timeToMinutes(time: string): number {
-  const [h, m] = time.split(":").map(Number);
-  return h * 60 + m;
-}
-
-/**
- * Calculate attendance metrics from check-in / check-out times.
- */
-function calculateAttendanceMetrics(
-  checkIn: string | null | undefined,
-  checkOut: string | null | undefined
-) {
-  let lateMinutes = 0;
-  let workingHours = 0;
-  let overtimeHours = 0;
-  let autoStatus: string | null = null;
-
-  const startMinutes = timeToMinutes(WORKING_HOURS.START); // 08:00 → 480
-  const endMinutes = timeToMinutes(WORKING_HOURS.END); // 17:00 → 1020
-
-  if (checkIn) {
-    const checkInMinutes = timeToMinutes(checkIn);
-    if (checkInMinutes > startMinutes) {
-      lateMinutes = checkInMinutes - startMinutes;
-    }
-
-    // Auto-mark absent if late > threshold
-    if (lateMinutes > LATE_ABSENT_THRESHOLD) {
-      autoStatus = "ABSENT";
-    } else if (lateMinutes > 0) {
-      autoStatus = "LATE";
-    }
-
-    if (checkOut) {
-      const checkOutMinutes = timeToMinutes(checkOut);
-      const workedMinutes = Math.max(0, checkOutMinutes - checkInMinutes);
-      workingHours = Math.round((workedMinutes / 60) * 100) / 100;
-
-      // Overtime: any work beyond the standard end time
-      if (checkOutMinutes > endMinutes) {
-        const otMinutes = checkOutMinutes - endMinutes;
-        overtimeHours = Math.round((otMinutes / 60) * 100) / 100;
-      }
-    }
-  }
-
-  return { lateMinutes, workingHours, overtimeHours, autoStatus };
-}
-
-/**
- * Calculate late deduction amount from late minutes.
- */
-function calculateLateDeduction(lateMinutes: number): number {
-  for (const rule of LATE_RULES) {
-    if (lateMinutes >= rule.minMinutes && lateMinutes <= rule.maxMinutes) {
-      return rule.deduction;
-    }
-  }
-  return 0;
-}
-
-// Export for use in payroll engine
-export { calculateAttendanceMetrics, calculateLateDeduction };
+  calculateAttendanceMetrics,
+  toUtcDateTime,
+} from "@/src/lib/attendance";
+import {
+  findFinalizedPayroll,
+  finalizedPayrollMessage,
+} from "@/src/lib/payroll-guard";
 
 /**
  * GET /api/attendance — list attendance records with search/pagination/sort/filter
  */
 export async function GET(request: NextRequest) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const url = new URL(request.url);
     const { page, pageSize, sortBy, sortOrder, skip } = parseListParams(url);
 
@@ -165,6 +105,9 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return auth.response;
+
     const body = await request.json();
     const result = attendanceSchema.safeParse(body);
 
@@ -202,6 +145,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Tolak perubahan bila payroll periode ini sudah APPROVED/PAID
+    const locked = await findFinalizedPayroll(
+      result.data.employeeId,
+      new Date(result.data.date)
+    );
+    if (locked) {
+      return errorResponse(
+        finalizedPayrollMessage(locked.month, locked.year, locked.status),
+        409
+      );
+    }
+
     // Calculate metrics
     const checkIn = result.data.checkIn || null;
     const checkOut = result.data.checkOut || null;
@@ -214,10 +169,10 @@ export async function POST(request: NextRequest) {
       finalStatus = metrics.autoStatus as typeof finalStatus;
     }
 
-    // Build checkIn/checkOut as full DateTime (date + time)
+    // Wall-clock time disimpan UTC-anchored (klien merender dengan getUTC*)
     const dateStr = result.data.date;
-    const checkInDt = checkIn ? new Date(`${dateStr}T${checkIn}:00`) : null;
-    const checkOutDt = checkOut ? new Date(`${dateStr}T${checkOut}:00`) : null;
+    const checkInDt = toUtcDateTime(dateStr, checkIn);
+    const checkOutDt = toUtcDateTime(dateStr, checkOut);
 
     const attendance = await prisma.attendance.create({
       data: {
