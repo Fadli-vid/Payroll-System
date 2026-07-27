@@ -73,6 +73,8 @@ export const employeeSchema = z.object({
     .or(z.literal("")),
   phone: z.string().max(20).optional().or(z.literal("")),
   address: z.string().max(500).optional().or(z.literal("")),
+  bankName: z.string().max(100).optional().or(z.literal("")),
+  bankAccount: z.string().max(50).optional().or(z.literal("")),
   hireDate: z.iso.date("Format tanggal tidak valid"),
   status: z.enum(["ACTIVE", "INACTIVE", "RESIGNED", "TERMINATED"]),
   baseSalary: z.coerce.number().min(0, "Gaji pokok tidak boleh negatif"),

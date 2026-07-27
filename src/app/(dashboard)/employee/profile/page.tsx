@@ -13,6 +13,7 @@ import {
   Briefcase,
   BadgeDollarSign,
   ShieldCheck,
+  Landmark,
 } from "lucide-react";
 
 import {
@@ -33,6 +34,8 @@ interface EmployeeProfile {
   email: string;
   phone: string | null;
   address: string | null;
+  bankName: string | null;
+  bankAccount: string | null;
   hireDate: string;
   status: string;
   baseSalary: number;
@@ -157,6 +160,20 @@ export default function EmployeeProfilePage() {
               <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
                 {formatCurrency(profile.baseSalary)}
               </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                <Landmark className="h-3.5 w-3.5 text-primary" /> Nama Bank
+              </div>
+              <div className="text-sm font-medium">{profile.bankName || "—"}</div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                <Landmark className="h-3.5 w-3.5 text-primary" /> No. Rekening
+              </div>
+              <div className="text-sm font-medium font-mono">{profile.bankAccount || "—"}</div>
             </div>
           </div>
 

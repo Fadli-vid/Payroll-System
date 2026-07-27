@@ -102,6 +102,8 @@ model Employee {
   email        String           @unique
   phone        String?
   address      String?
+  bankName     String?
+  bankAccount  String?
   hireDate     DateTime
   status       EmploymentStatus @default(ACTIVE)
   baseSalary   Decimal          @db.Decimal(15, 2)

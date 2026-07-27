@@ -25,6 +25,8 @@ export async function GET(_request: NextRequest) {
             code: true,
             fullName: true,
             email: true,
+            bankName: true,
+            bankAccount: true,
             department: { select: { name: true } },
             position: { select: { name: true } },
           },

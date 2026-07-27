@@ -57,6 +57,8 @@ interface Payslip {
     code: string;
     fullName: string;
     email: string;
+    bankName?: string;
+    bankAccount?: string;
     department: { name: string };
     position: { name: string };
   };
@@ -248,6 +250,14 @@ export default function EmployeePayslipsPage() {
                   <div>
                     <span className="text-muted-foreground">Jabatan:</span>{" "}
                     <strong>{selectedPayslip.employee.position.name}</strong>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Bank:</span>{" "}
+                    <strong>{selectedPayslip.employee.bankName || "-"}</strong>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">No. Rekening:</span>{" "}
+                    <strong className="font-mono">{selectedPayslip.employee.bankAccount || "-"}</strong>
                   </div>
                 </div>
               </div>

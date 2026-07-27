@@ -60,6 +60,8 @@ interface Employee {
   email: string;
   phone: string | null;
   address: string | null;
+  bankName: string | null;
+  bankAccount: string | null;
   hireDate: string;
   status: string;
   baseSalary: number;
@@ -128,6 +130,8 @@ export default function EmployeesPage() {
       email: "",
       phone: "",
       address: "",
+      bankName: "",
+      bankAccount: "",
       hireDate: "",
       status: "ACTIVE",
       baseSalary: 0,
@@ -213,6 +217,8 @@ export default function EmployeesPage() {
       password: "",
       phone: "",
       address: "",
+      bankName: "",
+      bankAccount: "",
       hireDate: todayLocalISO(),
       status: "ACTIVE",
       baseSalary: 0,
@@ -234,6 +240,8 @@ export default function EmployeesPage() {
       password: "",
       phone: emp.phone ?? "",
       address: emp.address ?? "",
+      bankName: emp.bankName ?? "",
+      bankAccount: emp.bankAccount ?? "",
       hireDate: emp.hireDate.split("T")[0],
       status: emp.status as EmployeeFormValues["status"],
       baseSalary: emp.baseSalary,
@@ -839,7 +847,27 @@ export default function EmployeesPage() {
               gaji karyawan ini.
             </p>
 
-            {/* Row 6: Address */}
+            {/* Row 6: Bank Name + Bank Account */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="bankName">Nama Bank</Label>
+                <Input
+                  id="bankName"
+                  placeholder="cth. BCA, Mandiri, BRI"
+                  {...form.register("bankName")}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="bankAccount">No. Rekening</Label>
+                <Input
+                  id="bankAccount"
+                  placeholder="cth. 1234567890"
+                  {...form.register("bankAccount")}
+                />
+              </div>
+            </div>
+
+            {/* Row 7: Address */}
             <div className="space-y-2">
               <Label htmlFor="address">Alamat</Label>
               <Input

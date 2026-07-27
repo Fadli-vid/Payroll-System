@@ -175,6 +175,8 @@ export async function POST(request: NextRequest) {
           password: passwordHash,
           phone: result.data.phone || null,
           address: result.data.address || null,
+          bankName: result.data.bankName || null,
+          bankAccount: result.data.bankAccount || null,
           hireDate: new Date(result.data.hireDate),
           status: result.data.status,
           baseSalary: result.data.baseSalary,

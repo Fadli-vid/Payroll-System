@@ -53,6 +53,8 @@ interface PayrollData {
     email: string;
     phone?: string;
     address?: string;
+    bankName?: string;
+    bankAccount?: string;
     hireDate: string;
     department: {
       id: string;
@@ -255,7 +257,7 @@ export default function SalarySlipPage({
           </div>
 
           {/* Employee Information */}
-          <div className="grid grid-cols-1 min-[400px]:grid-cols-2 sm:grid-cols-4 print:grid-cols-4 gap-4 p-4 rounded-lg bg-muted/40 print:bg-transparent print:border print:border-border text-sm">
+          <div className="grid grid-cols-1 min-[400px]:grid-cols-2 sm:grid-cols-3 print:grid-cols-3 gap-4 p-4 rounded-lg bg-muted/40 print:bg-transparent print:border print:border-border text-sm">
             <div>
               <span className="text-xs text-muted-foreground block">
                 NIP / Kode Karyawan
@@ -282,6 +284,22 @@ export default function SalarySlipPage({
               </span>
               <span className="font-semibold">
                 {payroll.employee.position.name}
+              </span>
+            </div>
+            <div>
+              <span className="text-xs text-muted-foreground block">
+                Nama Bank
+              </span>
+              <span className="font-semibold">
+                {payroll.employee.bankName || "-"}
+              </span>
+            </div>
+            <div>
+              <span className="text-xs text-muted-foreground block">
+                No. Rekening
+              </span>
+              <span className="font-semibold">
+                {payroll.employee.bankAccount || "-"}
               </span>
             </div>
           </div>

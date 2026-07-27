@@ -123,6 +123,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       email: result.data.email,
       phone: result.data.phone || null,
       address: result.data.address || null,
+      bankName: result.data.bankName || null,
+      bankAccount: result.data.bankAccount || null,
       hireDate: new Date(result.data.hireDate),
       status: result.data.status,
       baseSalary: result.data.baseSalary,
