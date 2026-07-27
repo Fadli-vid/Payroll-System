@@ -146,33 +146,55 @@ function BarChart({
 }: {
   data: { label: string; total: number }[];
 }) {
-  const maxValue = Math.max(...data.map((d) => d.total), 1);
+  const maxTotal = Math.max(...data.map((d) => d.total), 0);
+
+  if (maxTotal === 0) {
+    return (
+      <div className="flex h-52 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/20 p-6 text-center">
+        <p className="text-sm font-medium text-muted-foreground">
+          Belum ada data penggajian pada 6 bulan terakhir
+        </p>
+        <p className="text-xs text-muted-foreground/70 mt-1 max-w-sm">
+          Buat penggajian batch pada menu <strong className="text-foreground">&quot;Penggajian Batch&quot;</strong> untuk melihat perbandingan total gaji bulanan.
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex items-end gap-2 h-48 pt-4">
+    <div className="flex items-end gap-2 sm:gap-4 h-56 pt-6 pb-2 px-2">
       {data.map((item, i) => {
-        const heightPercent = maxValue > 0 ? (item.total / maxValue) * 100 : 0;
+        const heightPercent = maxTotal > 0 ? (item.total / maxTotal) * 100 : 0;
+        const isHighest = item.total === maxTotal && maxTotal > 0;
+
         return (
           <div
             key={i}
-            className="relative min-w-0 flex-1 flex flex-col items-center gap-2 group"
+            className="relative min-w-0 flex-1 flex flex-col items-center gap-2 group h-full justify-end"
           >
-            {/* Value tooltip — absolute agar teks nominal tidak memaksa
-                lebar minimum kolom (overflow terpotong Card di mobile) */}
-            <div className="relative h-4 w-full">
-              <div className="absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap text-[10px] font-medium text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 pointer-events-none">
-                {formatCurrency(item.total)}
-              </div>
+            {/* Amount label on top */}
+            <div className="text-[10px] sm:text-xs font-semibold text-muted-foreground group-hover:text-primary transition-colors whitespace-nowrap truncate max-w-full text-center">
+              {item.total > 0 ? formatCurrency(item.total) : "—"}
             </div>
-            {/* Bar */}
-            <div className="w-full flex flex-col justify-end h-full">
-              <div
-                className="w-full rounded-t-md bg-gradient-to-t from-primary to-primary/60 transition-all duration-500 ease-out hover:from-primary hover:to-primary/80 min-h-[4px]"
-                style={{ height: `${Math.max(heightPercent, 3)}%` }}
-              />
+
+            {/* Bar container */}
+            <div className="w-full flex flex-col justify-end flex-1 rounded-t-lg bg-muted/20 overflow-hidden">
+              {item.total > 0 ? (
+                <div
+                  className={`w-full rounded-t-md transition-all duration-700 ease-out ${
+                    isHighest
+                      ? "bg-gradient-to-t from-primary to-emerald-400 shadow-md shadow-primary/20"
+                      : "bg-gradient-to-t from-primary/80 to-primary/50 group-hover:from-primary group-hover:to-primary/80"
+                  }`}
+                  style={{ height: `${Math.max(heightPercent, 8)}%` }}
+                />
+              ) : (
+                <div className="w-full h-1 bg-muted-foreground/20 rounded-full" />
+              )}
             </div>
-            {/* Label */}
-            <span className="max-w-full truncate text-[10px] text-muted-foreground font-medium">
+
+            {/* Month label */}
+            <span className="max-w-full truncate text-[10px] sm:text-xs text-muted-foreground font-medium group-hover:text-foreground transition-colors">
               <span className="sm:hidden">{item.label.split(" ")[0]}</span>
               <span className="hidden sm:inline">{item.label}</span>
             </span>

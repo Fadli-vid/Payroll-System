@@ -38,6 +38,7 @@ Buka [http://localhost:3000](http://localhost:3000).
 - [docs/PAYROLL_SYSTEM_GUIDE.md](docs/PAYROLL_SYSTEM_GUIDE.md) — alur bisnis, rumus perhitungan, proteksi data.
 - [docs/DATABASE_GUIDE.md](docs/DATABASE_GUIDE.md) — struktur tabel, relasi, dan konvensi database.
 - [docs/STRUCTURE_GUIDE.md](docs/STRUCTURE_GUIDE.md) — peta struktur folder & file kode (app, components, lib, route `[id]`, dst.) dalam bahasa sederhana.
+- [docs/payroll.dbml](docs/payroll.dbml) — skrip DBML struktur database untuk diagram LRS/ERD (paste ke [dbdiagram.io](https://dbdiagram.io)).
 
 ## Seeding Data
 

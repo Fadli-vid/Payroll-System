@@ -2,9 +2,6 @@ import { requireAdmin } from "@/src/lib/authz";
 import { prisma } from "@/src/lib/prisma";
 import { successResponse, errorResponse } from "@/src/utils/api-response";
 
-// Angka uang dashboard hanya menghitung payroll final (bukan DRAFT).
-const FINAL_STATUSES = ["APPROVED", "PAID"] as const;
-
 export async function GET() {
   try {
     const auth = await requireAdmin();
@@ -34,7 +31,6 @@ export async function GET() {
           where: {
             month: currentMonth,
             year: currentYear,
-            status: { in: [...FINAL_STATUSES] },
           },
           _sum: {
             netSalary: true,
@@ -94,39 +90,39 @@ export async function GET() {
     }
 
     return successResponse({
-        stats: {
-          totalEmployees,
-          activeEmployees,
-          totalDepartments,
-          totalPositions,
-          payrollThisMonth: Number(payrollThisMonth._sum?.netSalary ?? 0),
-          totalOvertime: Number(payrollThisMonth._sum?.overtimePay ?? 0),
-          totalDeductions: Number(payrollThisMonth._sum?.deductionTotal ?? 0),
-          totalAllowances: Number(payrollThisMonth._sum?.allowanceTotal ?? 0),
-          payrollCount: payrollThisMonth._count ?? 0,
-        },
-        statusCounts,
-        recentEmployees: recentEmployees.map((e) => ({
-          id: e.id,
-          code: e.code,
-          fullName: e.fullName,
-          email: e.email,
-          status: e.status,
-          department: e.department?.name || "-",
-          position: e.position?.name || "-",
-          baseSalary: Number(e.baseSalary || 0),
-          hireDate: e.hireDate ? e.hireDate.toISOString() : new Date().toISOString(),
-        })),
-        recentPayrolls: recentPayrolls.map((p) => ({
-          id: p.id,
-          employeeName: p.employee?.fullName || "-",
-          employeeCode: p.employee?.code || "-",
-          month: p.month,
-          year: p.year,
-          netSalary: Number(p.netSalary || 0),
-          status: p.status,
-        })),
-        monthlyChart: monthlyPayrollData,
+      stats: {
+        totalEmployees,
+        activeEmployees,
+        totalDepartments,
+        totalPositions,
+        payrollThisMonth: Number(payrollThisMonth._sum?.netSalary ?? 0),
+        totalOvertime: Number(payrollThisMonth._sum?.overtimePay ?? 0),
+        totalDeductions: Number(payrollThisMonth._sum?.deductionTotal ?? 0),
+        totalAllowances: Number(payrollThisMonth._sum?.allowanceTotal ?? 0),
+        payrollCount: payrollThisMonth._count ?? 0,
+      },
+      statusCounts,
+      recentEmployees: recentEmployees.map((e) => ({
+        id: e.id,
+        code: e.code,
+        fullName: e.fullName,
+        email: e.email,
+        status: e.status,
+        department: e.department?.name || "-",
+        position: e.position?.name || "-",
+        baseSalary: Number(e.baseSalary || 0),
+        hireDate: e.hireDate ? e.hireDate.toISOString() : new Date().toISOString(),
+      })),
+      recentPayrolls: recentPayrolls.map((p) => ({
+        id: p.id,
+        employeeName: p.employee?.fullName || "-",
+        employeeCode: p.employee?.code || "-",
+        month: p.month,
+        year: p.year,
+        netSalary: Number(p.netSalary || 0),
+        status: p.status,
+      })),
+      monthlyChart: monthlyPayrollData,
     });
   } catch (error) {
     console.error("Dashboard API error:", error);
@@ -136,6 +132,7 @@ export async function GET() {
 
 /**
  * Get monthly payroll totals for the last 6 months using 1 groupBy query instead of 6 aggregate queries.
+ * Sums netSalary across all payrolls generated for each month so the chart dynamically reflects monthly salary totals.
  */
 async function getMonthlyPayrollData(currentMonth: number, currentYear: number) {
   const months: { month: number; year: number; label: string }[] = [];
@@ -167,7 +164,6 @@ async function getMonthlyPayrollData(currentMonth: number, currentYear: number) 
   try {
     const grouped = await prisma.payroll.groupBy({
       by: ["month", "year"],
-      where: { status: { in: [...FINAL_STATUSES] } },
       _sum: { netSalary: true },
     });
 

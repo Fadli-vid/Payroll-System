@@ -1,0 +1,279 @@
+// ─────────────────────────────────────────────────────────
+// LRS / Skema Database — Sistem Penggajian (Payroll System)
+// Format: DBML (Database Markup Language)
+// Cara pakai: buka https://dbdiagram.io → New Diagram →
+//             hapus contoh bawaan → paste seluruh isi file ini.
+// Sumber kebenaran: prisma/schema.prisma (dokumen ini diturunkan darinya)
+// ─────────────────────────────────────────────────────────
+
+Project payroll_system {
+  database_type: 'PostgreSQL'
+  Note: 'Sistem Manajemen Penggajian — Next.js 16 + Prisma + PostgreSQL (Supabase)'
+}
+
+// ─── Enums ───────────────────────────────────────────────
+
+Enum user_role {
+  ADMIN
+  EMPLOYEE
+}
+
+Enum employment_status {
+  ACTIVE
+  INACTIVE
+  RESIGNED
+  TERMINATED
+}
+
+Enum attendance_status {
+  PRESENT
+  LATE
+  LEAVE
+  SICK
+  VACATION
+  ABSENT
+}
+
+Enum payroll_status {
+  DRAFT
+  APPROVED
+  PAID
+}
+
+Enum payroll_detail_type {
+  EARNING
+  DEDUCTION
+}
+
+Enum allowance_type {
+  FIXED
+  PERCENTAGE
+}
+
+Enum deduction_type {
+  FIXED
+  PERCENTAGE
+}
+
+Enum penalty_type {
+  LATE
+  ABSENT
+}
+
+Enum penalty_mode {
+  FIXED
+  PERCENTAGE
+}
+
+// ─── Master Data ─────────────────────────────────────────
+
+Table departments {
+  id          uuid      [pk, default: `uuid()`]
+  name        varchar   [unique, not null, note: 'Nama departemen (unik)']
+  description text      [null]
+  createdAt   timestamp [not null, default: `now()`]
+  updatedAt   timestamp [not null]
+
+  Note: 'Master data departemen/divisi perusahaan'
+}
+
+Table positions {
+  id            uuid          [pk, default: `uuid()`]
+  name          varchar       [unique, not null, note: 'Nama jabatan (unik)']
+  baseAllowance decimal(15,2) [not null, default: 0, note: 'Tunjangan standar jabatan']
+  description   text          [null]
+  createdAt     timestamp     [not null, default: `now()`]
+  updatedAt     timestamp     [not null]
+
+  Note: 'Master data jabatan/posisi kerja'
+}
+
+Table employees {
+  id           uuid              [pk, default: `uuid()`]
+  code         varchar           [unique, not null, note: 'NIK / Kode Karyawan (unik)']
+  fullName     varchar           [not null]
+  email        varchar           [unique, not null]
+  phone        varchar           [null]
+  address      text              [null]
+  hireDate     timestamp         [not null, note: 'Tanggal mulai bekerja']
+  status       employment_status [not null, default: 'ACTIVE']
+  baseSalary   decimal(15,2)     [not null, note: 'Gaji pokok per bulan']
+  password     varchar           [not null, note: 'Hash bcrypt — tidak pernah dikirim ke browser']
+  role         user_role         [not null, default: 'EMPLOYEE']
+  departmentId uuid              [not null]
+  positionId   uuid              [not null]
+  createdAt    timestamp         [not null, default: `now()`]
+  updatedAt    timestamp         [not null]
+
+  indexes {
+    departmentId
+    positionId
+  }
+
+  Note: 'Tabel utama karyawan (juga akun login portal karyawan)'
+}
+
+// ─── Kehadiran ───────────────────────────────────────────
+
+Table attendances {
+  id            uuid              [pk, default: `uuid()`]
+  employeeId    uuid              [not null]
+  date          date              [not null, note: 'Tanggal presensi (UTC midnight)']
+  status        attendance_status [not null, default: 'PRESENT']
+  checkIn       timestamp         [null, note: 'Wall-clock UTC-anchored: ...T08:00:00Z = jam 08:00']
+  checkOut      timestamp         [null, note: 'Konvensi sama dengan checkIn']
+  lateMinutes   int               [not null, default: 0]
+  overtimeHours decimal(5,2)      [not null, default: 0]
+  workingHours  decimal(5,2)      [not null, default: 0]
+  notes         text              [null]
+  createdAt     timestamp         [not null, default: `now()`]
+  updatedAt     timestamp         [not null]
+
+  indexes {
+    (employeeId, date) [unique, note: '1 record presensi per karyawan per tanggal']
+    employeeId
+    date
+  }
+
+  Note: 'Presensi harian. Terkunci (409) bila payroll periode tsb sudah APPROVED/PAID'
+}
+
+// ─── Master Tunjangan & Potongan ─────────────────────────
+
+Table allowances {
+  id          uuid           [pk, default: `uuid()`]
+  name        varchar        [unique, not null]
+  type        allowance_type [not null, default: 'FIXED', note: 'FIXED = Rupiah, PERCENTAGE = % gaji pokok']
+  amount      decimal(15,2)  [not null]
+  description text           [null]
+  isActive    boolean        [not null, default: true]
+  createdAt   timestamp      [not null, default: `now()`]
+  updatedAt   timestamp      [not null]
+
+  Note: 'Master jenis tunjangan (mis. Transport, Makan)'
+}
+
+Table deductions {
+  id          uuid           [pk, default: `uuid()`]
+  name        varchar        [unique, not null]
+  type        deduction_type [not null, default: 'FIXED', note: 'FIXED = Rupiah, PERCENTAGE = % gaji pokok']
+  amount      decimal(15,2)  [not null]
+  description text           [null]
+  isActive    boolean        [not null, default: true]
+  createdAt   timestamp      [not null, default: `now()`]
+  updatedAt   timestamp      [not null]
+
+  Note: 'Master jenis potongan (mis. BPJS, Koperasi)'
+}
+
+// ─── Junction (Many-to-Many) ─────────────────────────────
+
+Table employee_allowances {
+  id          uuid      [pk, default: `uuid()`]
+  employeeId  uuid      [not null]
+  allowanceId uuid      [not null]
+  createdAt   timestamp [not null, default: `now()`]
+  updatedAt   timestamp [not null]
+
+  indexes {
+    (employeeId, allowanceId) [unique]
+  }
+
+  Note: 'Sumber otoritatif engine payroll: tunjangan yang benar-benar diterima tiap karyawan'
+}
+
+Table employee_deductions {
+  id          uuid      [pk, default: `uuid()`]
+  employeeId  uuid      [not null]
+  deductionId uuid      [not null]
+  createdAt   timestamp [not null, default: `now()`]
+  updatedAt   timestamp [not null]
+
+  indexes {
+    (employeeId, deductionId) [unique]
+  }
+
+  Note: 'Sumber otoritatif engine payroll: potongan yang dikenakan ke tiap karyawan'
+}
+
+// ─── Penggajian ──────────────────────────────────────────
+
+Table payrolls {
+  id             uuid           [pk, default: `uuid()`]
+  employeeId     uuid           [not null]
+  month          int            [not null, note: '1-12']
+  year           int            [not null]
+  basicSalary    decimal(15,2)  [not null]
+  allowanceTotal decimal(15,2)  [not null, default: 0]
+  deductionTotal decimal(15,2)  [not null, default: 0]
+  overtimePay    decimal(15,2)  [not null, default: 0]
+  bonus          decimal(15,2)  [not null, default: 0]
+  netSalary      decimal(15,2)  [not null, note: 'max(0, pokok + tunjangan + lembur + bonus - potongan)']
+  status         payroll_status [not null, default: 'DRAFT', note: 'DRAFT → APPROVED → PAID (PAID final)']
+  approvedAt     timestamp      [null]
+  paidAt         timestamp      [null]
+  createdAt      timestamp      [not null, default: `now()`]
+  updatedAt      timestamp      [not null]
+
+  indexes {
+    (employeeId, month, year) [unique, note: '1 slip per karyawan per periode']
+    employeeId
+    (month, year)
+  }
+
+  Note: 'Header slip gaji bulanan per karyawan'
+}
+
+Table payroll_details {
+  id          uuid                [pk, default: `uuid()`]
+  payrollId   uuid                [not null]
+  component   varchar             [not null, note: 'mis. "Tunjangan Transport", "Uang Lembur", "Penalti Keterlambatan"']
+  type        payroll_detail_type [not null, note: 'EARNING (+) atau DEDUCTION (-)']
+  amount      decimal(15,2)       [not null]
+  description text                [null]
+  createdAt   timestamp           [not null, default: `now()`]
+  updatedAt   timestamp           [not null]
+
+  indexes {
+    payrollId
+  }
+
+  Note: 'Baris rincian komponen pembentuk slip gaji'
+}
+
+// ─── Aturan Penalti (berdiri sendiri, tanpa FK) ──────────
+
+Table penalty_settings {
+  id          uuid          [pk, default: `uuid()`]
+  type        penalty_type  [not null, note: 'LATE = terlambat, ABSENT = alpa']
+  mode        penalty_mode  [not null]
+  value       decimal(15,2) [not null, note: 'Rupiah (FIXED) atau % gaji pokok (PERCENTAGE)']
+  minMinutes  int           [not null, default: 0, note: 'Batas bawah menit terlambat (tier LATE)']
+  maxMinutes  int           [null, note: 'Batas atas menit (null = tak terbatas)']
+  description text          [null]
+  isActive    boolean       [not null, default: true]
+  createdAt   timestamp     [not null, default: `now()`]
+  updatedAt   timestamp     [not null]
+
+  Note: 'Aturan denda presensi. Tidak ber-relasi FK — dibaca engine saat generate gaji, hasilnya ditulis sebagai payroll_details bertipe DEDUCTION'
+}
+
+// ─── Relasi (LRS) ────────────────────────────────────────
+// Notasi: "<" = one-to-many (1 induk : N anak)
+
+// Master → Karyawan
+Ref: employees.departmentId > departments.id // N karyawan : 1 departemen
+Ref: employees.positionId   > positions.id   // N karyawan : 1 jabatan
+
+// Karyawan → transaksi
+Ref: attendances.employeeId > employees.id   // N presensi : 1 karyawan
+Ref: payrolls.employeeId    > employees.id   // N slip gaji : 1 karyawan
+
+// Many-to-Many via junction (cascade: hapus induk = hapus baris junction)
+Ref: employee_allowances.employeeId  > employees.id  [delete: cascade]
+Ref: employee_allowances.allowanceId > allowances.id [delete: cascade]
+Ref: employee_deductions.employeeId  > employees.id  [delete: cascade]
+Ref: employee_deductions.deductionId > deductions.id [delete: cascade]
+
+// Slip gaji → rinciannya (cascade: hapus slip = hapus rincian)
+Ref: payroll_details.payrollId > payrolls.id [delete: cascade]
